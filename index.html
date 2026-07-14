@@ -1952,13 +1952,6 @@ async function loadStats(){
       if(p.history?.diabetes) dm++;
     });
 
-    // 기간 내 신환 (등록일이 기간 안에 있는 환자, 단 일괄 가져오기로 등록된 환자·테스트용 환자는 항상 제외)
-    let newInRangeQuery = db.collection('patients')
-      .where('createdAt','>=',startTs).where('createdAt','<=',endTs);
-    if(statsSiteFilter!=='all') newInRangeQuery = newInRangeQuery.where('siteId','==',statsSiteFilter);
-    const newInRangeSnap = await newInRangeQuery.get();
-    const newInRange = newInRangeSnap.docs.filter(d => !d.data().imported && !d.data().testPatient).length;
-
     // 기간 내 전체 방문(진료) 기록 - collectionGroup 조회
     // 접수 시 자동 생성되는 "(초진 등록)" 스텁이나 빈 프로그레스 노트는 실제 진료로 세지 않음
     const visitsSnapRaw = await db.collectionGroup('visits')
@@ -1977,7 +1970,6 @@ async function loadStats(){
       return true;
     });
     const totalVisitsInRange = realVisitDocs.length;
-    const returnVisitsInRange = Math.max(0, totalVisitsInRange - newInRange);
 
     statsVisitList = realVisitDocs.map(v=>{
       const patientId = v.ref.parent.parent.id;
@@ -1994,6 +1986,10 @@ async function loadStats(){
       const tb = b.date?.toDate ? b.date.toDate().getTime() : 0;
       return tb - ta;
     });
+
+    // 위 숫자(신환/재진)는 반드시 명단과 같은 기준(방문 건 단위)으로 계산 - 아래에서 세는 방식과 통일
+    const newInRange = statsVisitList.filter(v=>v.isNew).length;
+    const returnVisitsInRange = totalVisitsInRange - newInRange;
 
     let rxCount = {};
     realVisitDocs.forEach(v=>{
