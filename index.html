@@ -1971,12 +1971,29 @@ async function loadStats(){
     });
     const totalVisitsInRange = realVisitDocs.length;
 
+    // 신환 판정: "선택한 기간에 등록됐는지"가 아니라 "이 방문이 그 환자의 평생 첫 실제 진료인지"로 판단.
+    // 이렇게 해야 '오늘/이번 주/이번 달' 중 무엇을 눌러도 같은 방문 기록이 항상 같은 결과(신환 또는 재진)로 나옴.
+    const uniquePatientIds = [...new Set(realVisitDocs.map(v => v.ref.parent.parent.id))];
+    const firstRealVisitMsMap = {};
+    await Promise.all(uniquePatientIds.map(async pid=>{
+      const pat = patientMap[pid];
+      if(!pat || pat.imported || pat.testPatient) return; // 가져온 환자·테스트 환자는 항상 재진 취급
+      const snap = await db.collection('patients').doc(pid).collection('visits')
+        .orderBy('date','asc').limit(20).get();
+      for(const d of snap.docs){
+        const note = (d.data().progressNote || '').trim();
+        if(note && note !== '(초진 등록)' && d.data().date && d.data().date.toMillis){
+          firstRealVisitMsMap[pid] = d.data().date.toMillis();
+          break;
+        }
+      }
+    }));
+
     statsVisitList = realVisitDocs.map(v=>{
       const patientId = v.ref.parent.parent.id;
       const p = patientMap[patientId] || {};
-      const createdMs = p.createdAt && p.createdAt.toMillis ? p.createdAt.toMillis() : null;
-      const isNew = !p.imported && !p.testPatient && createdMs !== null
-        && createdMs >= startTs.toMillis() && createdMs <= endTs.toMillis();
+      const visitMs = v.data().date && v.data().date.toMillis ? v.data().date.toMillis() : null;
+      const isNew = visitMs !== null && firstRealVisitMsMap[patientId] !== undefined && visitMs === firstRealVisitMsMap[patientId];
       return {
         patientId, name: p.name||'(알 수 없음)', regNo: p.regNo||'-', siteName: p.siteName||'-',
         date: v.data().date, progressNote: v.data().progressNote||'', isNew
@@ -1990,6 +2007,7 @@ async function loadStats(){
     // 위 숫자(신환/재진)는 반드시 명단과 같은 기준(방문 건 단위)으로 계산 - 아래에서 세는 방식과 통일
     const newInRange = statsVisitList.filter(v=>v.isNew).length;
     const returnVisitsInRange = totalVisitsInRange - newInRange;
+
 
     let rxCount = {};
     realVisitDocs.forEach(v=>{
