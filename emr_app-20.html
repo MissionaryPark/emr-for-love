@@ -1,0 +1,2095 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EMR for Love</title>
+<meta name="apple-mobile-web-app-title" content="EMR for Love">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#003876">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23003876'/%3E%3Crect x='42' y='20' width='16' height='60' rx='4' fill='white'/%3E%3Crect x='20' y='42' width='60' height='16' rx='4' fill='white'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23003876'/%3E%3Crect x='42' y='20' width='16' height='60' rx='4' fill='white'/%3E%3Crect x='20' y='42' width='60' height='16' rx='4' fill='white'/%3E%3C/svg%3E">
+<link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22EMR%20for%20Love%22%2C%22short_name%22%3A%22EMR%20for%20Love%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23F7F9FB%22%2C%22theme_color%22%3A%22%23003876%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%2520xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%2520viewBox%3D%270%25200%2520100%2520100%27%253E%253Crect%2520width%3D%27100%27%2520height%3D%27100%27%2520rx%3D%2720%27%2520fill%3D%27%2523003876%27%2F%253E%253Crect%2520x%3D%2742%27%2520y%3D%2720%27%2520width%3D%2716%27%2520height%3D%2760%27%2520rx%3D%274%27%2520fill%3D%27white%27%2F%253E%253Crect%2520x%3D%2720%27%2520y%3D%2742%27%2520width%3D%2760%27%2520height%3D%2716%27%2520rx%3D%274%27%2520fill%3D%27white%27%2F%253E%253C%2Fsvg%253E%22%2C%22sizes%22%3A%22192x192%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D">
+
+<!-- Firebase SDK (compat, CDN) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+
+<style>
+  :root{
+    --teal:#003876; --teal-dark:#00224A; --paper:#EEF2F7; --ink:#1B2430;
+    --ink-soft:#5B6472; --rust:#C0392B; --sage:#2E7D57; --line:#D8DEE6; --bg:#F7F9FB; --white:#FFFFFF;
+    --sky:#4F86C6;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR",sans-serif; background:var(--bg); color:var(--ink);}
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;}
+
+  /* ---- login ---- */
+  #login-screen{display:flex; align-items:center; justify-content:center; min-height:100vh;}
+  .login-box{background:var(--white); border:1px solid var(--line); border-radius:12px; padding:32px; width:340px;}
+  .login-box h1{font-family:-apple-system,"Segoe UI",Roboto,sans-serif; letter-spacing:-0.01em; font-size:19px; margin:0 0 4px;}
+  .login-box .sub{font-size:12px; color:var(--ink-soft); margin-bottom:22px;}
+  .role-pick{display:flex; gap:8px; margin-bottom:18px;}
+  .role-pick .rp{flex:1; text-align:center; padding:12px 4px; border:1px solid var(--line); border-radius:8px; cursor:pointer; font-size:13px;}
+  .role-pick .rp.active{background:var(--teal); color:#fff; border-color:var(--teal);}
+  .field label{display:block; font-size:12px; color:var(--ink-soft); margin-bottom:4px;}
+  .field input, .field select, .field textarea{width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:6px; font-size:14px; font-family:inherit; background:#FEFDFB; margin-bottom:12px;}
+  .btn{background:var(--teal); color:#fff; border:none; padding:10px 16px; border-radius:6px; font-size:13.5px; font-weight:600; cursor:pointer; width:100%;}
+  .btn:hover{background:var(--teal-dark);}
+  .btn.small{padding:6px 10px; font-size:12px; width:auto;}
+  .btn.outline{background:transparent; color:var(--teal); border:1px solid var(--teal);}
+  #login-error{color:var(--rust); font-size:12px; margin-top:8px; display:none;}
+
+  /* ---- shell ---- */
+  #app-shell{display:none;}
+  .shell{display:flex; min-height:100vh;}
+  .sidebar{width:220px; background:var(--teal-dark); color:#EDEBE3; padding:20px 16px; flex-shrink:0;}
+  .sidebar h1{font-size:14px; font-weight:700; margin:0 0 2px; font-family:-apple-system,"Segoe UI",Roboto,sans-serif; letter-spacing:-0.01em;}
+  .sidebar .whoami{font-size:11px; opacity:.7; margin-bottom:18px;}
+  .site-select{margin-bottom:18px;}
+  .site-select label{display:block; font-size:10.5px; text-transform:uppercase; letter-spacing:.08em; opacity:.55; margin-bottom:6px;}
+  .site-select select{width:100%; padding:8px; border-radius:6px; border:none; background:#3A6D6A; color:#fff; font-size:13px;}
+  .site-manage-link{font-size:11px; color:#B9E0DC; margin-top:6px; cursor:pointer; text-decoration:underline;}
+  .nav-item{padding:10px 10px; border-radius:6px; font-size:13.5px; margin-bottom:2px; cursor:pointer; display:flex; align-items:center; gap:8px; color:#D8D6CD;}
+  .nav-item.active{background:rgba(243,239,230,.14); color:#fff; font-weight:600;}
+  .nav-item:hover{background:rgba(243,239,230,.08);}
+  .nav-tag{margin-left:auto; font-size:10.5px; background:var(--rust); color:#fff; padding:1px 6px; border-radius:10px;}
+  .logout-link{font-size:11px; color:#D8D6CD; margin-top:24px; cursor:pointer; text-decoration:underline; display:block;}
+
+  .main{flex:1; padding:26px 34px; max-width:1100px;}
+  .topbar{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:20px; flex-wrap:wrap; gap:8px;}
+  .topbar h2{font-family:-apple-system,"Segoe UI",Roboto,sans-serif; letter-spacing:-0.01em; font-size:21px; margin:0;}
+
+  .card{background:var(--white); border:1px solid var(--line); border-radius:10px; padding:20px 22px; margin-bottom:16px;}
+  .card h3{font-size:12.5px; text-transform:uppercase; letter-spacing:.08em; color:var(--ink-soft); margin:0 0 14px; border-bottom:1px solid var(--line); padding-bottom:8px;}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:14px;}
+  @media(max-width:700px){.grid2{grid-template-columns:1fr;} .sidebar{width:100%; position:static;} .shell{flex-direction:column;}}
+  .checks{display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px;}
+  .chk{display:flex; align-items:center; gap:6px; font-size:13px; background:var(--paper); padding:6px 10px; border-radius:6px;}
+
+  .queue{display:flex; flex-direction:column; gap:10px;}
+  .queue-card{background:var(--white); border:1px solid var(--line); border-left:5px solid var(--teal); border-radius:8px; padding:14px 16px; display:flex; align-items:center; gap:16px; cursor:pointer;}
+  .queue-card:hover{box-shadow:0 2px 10px rgba(0,0,0,.06);}
+  .qc-info{flex:1;}
+  .qc-info .name{font-weight:700; font-size:15px;}
+  .qc-info .meta{font-size:12px; color:var(--ink-soft); margin-top:2px;}
+  .qc-regno{font-size:12px; padding:3px 8px; border-radius:4px; background:var(--paper); color:var(--teal-dark); font-weight:700;}
+  .badge-chronic{font-size:10px; background:#EFE2D0; color:var(--rust); padding:2px 6px; border-radius:4px; margin-left:6px;}
+  .empty-note{font-size:13px; color:var(--ink-soft); padding:20px; text-align:center;}
+
+  .chart-head{display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:18px; flex-wrap:wrap; gap:10px;}
+  .chart-name{font-size:18px; font-weight:700;}
+  .chart-meta{font-size:12.5px; color:var(--ink-soft);}
+  .tag-row{display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;}
+  .tag{font-size:10.5px; padding:2px 7px; border-radius:10px; background:#EFE9DB; color:var(--ink-soft);}
+  .tag.warn{background:#F3DCD3; color:var(--rust);}
+
+  .hist-edit-row{display:flex; justify-content:space-between; align-items:center;}
+  .hist-edit-toggle{font-size:12px; color:var(--teal); cursor:pointer; font-weight:600;}
+
+  .rx-preset{display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;}
+  .rx-chip{background:var(--paper); border:1px solid var(--line); border-radius:16px; padding:5px 12px; font-size:12px; cursor:pointer;}
+  .rx-chip:hover{background:#E9E2D2;}
+
+  .chronic-table{width:100%; border-collapse:collapse; font-size:13px;}
+  .chronic-table th{text-align:left; font-size:11px; color:var(--ink-soft); text-transform:uppercase; border-bottom:1px solid var(--line); padding:6px 8px;}
+  .chronic-table td{padding:7px 8px; border-bottom:1px solid #EFEBE1; font-family:ui-monospace,monospace;}
+
+  .timeline-entry{border-left:2px solid var(--line); padding:2px 0 18px 18px; position:relative; margin-left:6px;}
+  .timeline-entry::before{content:""; width:9px; height:9px; border-radius:50%; background:var(--teal); position:absolute; left:-5px; top:5px;}
+  .timeline-entry .tdate{font-size:11.5px; color:var(--ink-soft); font-family:ui-monospace,monospace; margin-bottom:4px;}
+  .timeline-entry .tsection{font-size:11px; text-transform:uppercase; color:var(--teal-dark); font-weight:700; letter-spacing:.05em; margin-top:8px;}
+  .timeline-entry p{margin:3px 0 0; font-size:13.5px; line-height:1.5; white-space:pre-wrap;}
+
+  .site-row{display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border:1px solid var(--line); border-radius:8px; margin-bottom:8px; background:var(--white);}
+  .site-row .prefix{font-family:ui-monospace,monospace; font-size:12px; background:var(--paper); padding:3px 8px; border-radius:4px; color:var(--teal-dark);}
+
+  .note{font-size:11.5px; color:var(--ink-soft); background:#FDF6E9; border:1px solid #EADDBC; border-radius:6px; padding:8px 12px; margin-bottom:16px;}
+  .vitals-strip{display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap;}
+  .vital{background:var(--paper); border-radius:8px; padding:10px 16px; text-align:center; min-width:80px;}
+  .vital .v{font-size:18px; font-weight:700; font-family:ui-monospace,monospace;}
+  .vital .l{font-size:10px; color:var(--ink-soft); text-transform:uppercase;}
+
+  .attach-row{display:flex; gap:8px; margin-top:6px; flex-wrap:wrap;}
+  .attach-chip{font-size:11px; background:var(--paper); padding:4px 9px; border-radius:5px; text-decoration:none; color:var(--teal); display:inline-flex; align-items:center; gap:4px;}
+  .attach-chip:hover{background:#E3E9F1;}
+
+  .appt-item{background:var(--white); border:1px solid var(--line); border-left:4px solid var(--teal); border-radius:6px; padding:8px 10px; margin-bottom:8px; font-size:12.5px;}
+  .appt-time{font-family:ui-monospace,monospace; font-weight:700; color:var(--teal-dark); font-size:12px; margin-right:6px;}
+
+  .pharm-status{font-size:10px; padding:2px 7px; border-radius:10px; background:var(--paper); color:var(--teal-dark); margin-left:6px;}
+
+  .history-panel{
+    position:fixed; top:0; right:-55%; width:50%; height:100%; background:#fff;
+    box-shadow:-4px 0 24px rgba(0,0,0,.15); z-index:60; display:flex; flex-direction:column;
+    transition:right .25s ease; overflow:hidden;
+  }
+  .history-panel.open{right:0;}
+  .history-panel-head{
+    background:var(--teal-dark); color:#fff; padding:14px 20px; display:flex; justify-content:space-between;
+    align-items:center; font-weight:700; font-size:14px;
+  }
+  .history-panel-body{flex:1; overflow-y:auto; padding:18px 22px;}
+  @media(max-width:800px){ .history-panel{width:100%; right:-100%;} }
+
+  .fab{
+    position:fixed; bottom:24px; right:24px; width:50px; height:50px; border-radius:50%;
+    background:linear-gradient(135deg,#4285F4,#9B72CB); color:#fff; display:flex; align-items:center;
+    justify-content:center; font-size:19px; box-shadow:0 4px 14px rgba(0,0,0,.25); cursor:pointer; z-index:50;
+  }
+  .gemini-panel{
+    position:fixed; bottom:86px; right:24px; width:420px; height:560px; background:#fff; border-radius:12px;
+    box-shadow:0 8px 30px rgba(0,0,0,.2); display:none; flex-direction:column; overflow:hidden; z-index:50;
+  }
+  .gemini-panel.open{display:flex;}
+  .gemini-head{background:linear-gradient(135deg,#4285F4,#9B72CB); color:#fff; padding:10px 14px; font-size:13px; font-weight:600;}
+  .gemini-body{flex:1; padding:12px; font-size:12.5px; color:var(--ink-soft); overflow-y:auto;}
+  .gemini-bubble{background:var(--paper); border-radius:8px; padding:8px 10px; margin-bottom:8px; max-width:88%;}
+  .gemini-bubble.me{background:#E3ECF7; margin-left:auto;}
+  .gemini-input{display:flex; border-top:1px solid var(--line);}
+  .gemini-input input{flex:1; border:none; padding:10px; font-size:12.5px;}
+  .gemini-input button{background:var(--teal); color:#fff; border:none; padding:0 14px; font-size:12px; cursor:pointer;}
+
+  @media(max-width:700px){
+    .fab{bottom:16px; right:16px;}
+    .gemini-panel{right:10px; left:10px; width:auto; bottom:76px;}
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= LOGIN ================= -->
+<div id="login-screen">
+  <div class="login-box">
+    <div id="pin-gate">
+      <h1>EMR for Love</h1>
+      <div class="sub">PIN 번호를 입력하세요</div>
+      <div class="field"><input id="pin-input" type="tel" autocomplete="off" maxlength="6" placeholder="숫자 입력" style="text-align:center; font-size:20px; letter-spacing:6px;" onkeydown="if(event.key==='Enter') checkPin()"></div>
+      <button class="btn" onclick="checkPin()">확인</button>
+      <div id="pin-error" style="color:var(--rust); font-size:12px; margin-top:8px; display:none;">PIN 번호가 올바르지 않습니다.</div>
+    </div>
+    <div id="role-form" style="display:none;">
+      <div style="display:flex; justify-content:flex-end; margin-bottom:8px;">
+        <select id="lang-select" onchange="setLang(this.value)" style="font-size:11px; padding:4px 6px; border:1px solid var(--line); border-radius:4px;">
+          <option value="ko">한국어</option>
+          <option value="km">ភាសាខ្មែរ</option>
+        </select>
+      </div>
+      <h1>EMR for Love</h1>
+      <div class="sub" id="login-sub">역할을 선택하고 이름을 입력하세요</div>
+      <div class="role-pick">
+        <div class="rp active" data-role="doctor" onclick="pickRole('doctor')" id="rp-doctor">진료실</div>
+        <div class="rp" data-role="reception" onclick="pickRole('reception')" id="rp-reception">접수</div>
+        <div class="rp" data-role="pharmacy" onclick="pickRole('pharmacy')" id="rp-pharmacy">약국</div>
+      </div>
+      <div class="field"><label id="lbl-name">이름</label><input id="login-name" placeholder="예: 김민준"></div>
+      <div class="field" id="dept-field"><label id="lbl-dept">진료과 (진료실인 경우)</label><input id="login-dept" placeholder="예: 가정의학과"></div>
+      <button class="btn" id="btn-start" onclick="doLogin()">시작하기</button>
+      <div id="login-error">이름을 입력해주세요.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="app-shell">
+  <div class="shell">
+    <div class="sidebar">
+      <h1>EMR for Love</h1>
+      <div class="whoami" id="whoami-label"></div>
+      <select id="sidebar-lang-select" onchange="setLang(this.value)" style="width:100%; margin-bottom:14px; font-size:11px; padding:5px 6px; border-radius:6px; border:none; background:#12335E; color:#fff;">
+        <option value="ko">한국어</option>
+        <option value="km">ភាសាខ្មែរ</option>
+      </select>
+
+      <div class="site-select">
+        <label>사이트</label>
+        <select id="site-select" onchange="onSiteChange()"></select>
+        <div class="site-manage-link" onclick="setScreen('sites')">+ 사이트 관리</div>
+      </div>
+
+      <div id="nav-list"></div>
+      <div class="logout-link" onclick="logout()">로그아웃 / 역할 변경</div>
+    </div>
+
+    <div class="main" id="main">
+      <div class="empty-note">불러오는 중...</div>
+    </div>
+  </div>
+</div>
+
+<!-- Gemini 의학 Q&A / 번역 위젯 -->
+<div class="fab" onclick="toggleGemini()">✦</div>
+<div class="gemini-panel" id="gemini-panel">
+  <div class="gemini-head">의학 Q&A · 번역 도우미</div>
+  <div class="gemini-body" id="gemini-body">
+    <div class="gemini-bubble">약물 용법·용량, 의학 지식, 크메르어-한국어 번역을 물어보세요. (환자 개인정보는 입력하지 마세요)</div>
+  </div>
+  <div class="gemini-input">
+    <input id="gemini-input" placeholder="질문을 입력하세요..." onkeydown="if(event.key==='Enter') sendGemini()">
+    <button onclick="sendGemini()">전송</button>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   0. FIREBASE 설정 — 여기에 본인의 firebaseConfig를 붙여넣으세요
+   ========================================================= */
+const firebaseConfig = {
+  apiKey: "AIzaSyBbDT9fzS28fL-QIHNW6V7WclN28IaCcDE",
+  authDomain: "emr-poipet.firebaseapp.com",
+  projectId: "emr-poipet",
+  storageBucket: "emr-poipet.firebasestorage.app",
+  messagingSenderId: "390212999233",
+  appId: "1:390212999233:web:41e7ec2c0e8736d8438ec0"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const auth = firebase.auth();
+const storage = firebase.storage();
+
+/* Gemini API 키 — Google AI Studio(aistudio.google.com)에서 무료로 발급받아 여기에 붙여넣으세요 */
+const GEMINI_API_KEY = "AQ.Ab8RN6K4DTnAV0WjFrH-F4cTAOn67073TDcFGUQpLbIolGC-yw";
+
+/* =========================================================
+   0-1. 다국어 (한국어 / 크메르어)
+   ========================================================= */
+let currentLang = localStorage.getItem('emr_lang') || 'ko';
+
+const I18N = {
+  ko:{
+    subtitle:'역할을 선택하고 이름을 입력하세요', doctorRole:'진료실', receptionRole:'접수', pharmacyRole:'약국',
+    nameLabel:'이름', deptLabel:'진료과 (진료실인 경우)', namePlaceholder:'예: 김민준',
+    start:'시작하기', nameRequired:'이름을 입력해주세요.',
+    navQueue:'대기 리스트', navReg:'신규 환자 등록', navSearch:'환자 검색', navSearchReception:'재방문 접수',
+    navCalendar:'예약 캘린더', navStats:'통계/보고서', navPharmacy:'약국',
+    logout:'로그아웃 / 역할 변경', siteManage:'+ 사이트 관리',
+    regTitle:'신규 환자 등록', personalInfo:'인적사항', name:'이름', gender:'성별', age:'나이', phone:'연락처',
+    site:'등록 사이트', female:'여', male:'남', history:'과거력', htn:'고혈압', dm:'당뇨', tb:'폐결핵',
+    hep:'간염', hiv:'에이즈', allergy:'약물 알레르기', surgery:'수술력', etc:'기타사항',
+    measure:'측정값', bp:'혈압 (mmHg)', weight:'체중 (kg)', submitReg:'등록하고 대기 리스트에 추가',
+    manualReg:'등록번호 직접 입력', autoReg:'자동 생성',
+    queueTitle:'대기환자 리스트', emptyQueue:'현재 대기 중인 환자가 없습니다.', loading:'불러오는 중...',
+    searchTitle:'환자 검색', searchTitleReception:'재방문 환자 접수', searchPlaceholder:'예: H00042 또는 이름',
+    search:'검색', noResults:'검색 결과가 없습니다.', checkIn:'대기 등록'
+  },
+  km:{
+    subtitle:'សូមជ្រើសរើសតួនាទី និងបញ្ចូលឈ្មោះ', doctorRole:'បន្ទប់ពិនិត្យ', receptionRole:'បុគ្គលិកទទួលភ្ញៀវ', pharmacyRole:'ឱសថស្ថាន',
+    nameLabel:'ឈ្មោះ', deptLabel:'ផ្នែកព្យាបាល (សម្រាប់វេជ្ជបណ្ឌិត)', namePlaceholder:'ឧ. គឹម មីនជុន',
+    start:'ចាប់ផ្តើម', nameRequired:'សូមបញ្ចូលឈ្មោះ។',
+    navQueue:'បញ្ជីរង់ចាំ', navReg:'ចុះឈ្មោះអ្នកជំងឺថ្មី', navSearch:'ស្វែងរកអ្នកជំងឺ', navSearchReception:'ចុះឈ្មោះមកវិញ',
+    navCalendar:'ប្រតិទិននាំពេល', navStats:'ស្ថិតិ/របាយការណ៍', navPharmacy:'ឱសថស្ថាន',
+    logout:'ចេញ / ប្តូរតួនាទី', siteManage:'+ គ្រប់គ្រងទីតាំង',
+    regTitle:'ចុះឈ្មោះអ្នកជំងឺថ្មី', personalInfo:'ព័ត៌មានផ្ទាល់ខ្លួន', name:'ឈ្មោះ', gender:'ភេទ', age:'អាយុ', phone:'លេខទូរស័ព្ទ',
+    site:'ទីតាំងចុះឈ្មោះ', female:'ស្រី', male:'ប្រុស', history:'ប្រវត្តិជំងឺ', htn:'សម្ពាធឈាមខ្ពស់', dm:'ទឹកនោមផ្អែម', tb:'របេង',
+    hep:'រលាកថ្លើម', hiv:'អេដស៍', allergy:'អាឡែស៊ីថ្នាំ', surgery:'ប្រវត្តិវះកាត់', etc:'ចំណាំផ្សេងៗ',
+    measure:'ការវាស់វែង', bp:'សម្ពាធឈាម (mmHg)', weight:'ទម្ងន់ (kg)', submitReg:'ចុះឈ្មោះ និងបញ្ចូលទៅបញ្ជីរង់ចាំ',
+    manualReg:'បញ្ចូលលេខចុះឈ្មោះដោយខ្លួនឯង', autoReg:'បង្កើតស្វ័យប្រវត្តិ',
+    queueTitle:'បញ្ជីអ្នកជំងឺរង់ចាំ', emptyQueue:'មិនមានអ្នកជំងឺកំពុងរង់ចាំទេ។', loading:'កំពុងផ្ទុក...',
+    searchTitle:'ស្វែងរកអ្នកជំងឺ', searchTitleReception:'ចុះឈ្មោះអ្នកជំងឺមកវិញ', searchPlaceholder:'ឧ. H00042 ឬ ឈ្មោះ',
+    search:'ស្វែងរក', noResults:'រកមិនឃើញលទ្ធផលទេ។', checkIn:'ចុះឈ្មោះរង់ចាំ'
+  }
+};
+function t(key){ return (I18N[currentLang] && I18N[currentLang][key]) || I18N.ko[key] || key; }
+
+function setLang(l){
+  currentLang = l;
+  localStorage.setItem('emr_lang', l);
+  applyLoginLang();
+  const sidebarSel = document.getElementById('sidebar-lang-select');
+  if(sidebarSel) sidebarSel.value = l;
+  if(document.getElementById('app-shell').style.display !== 'none'){ renderNav(); renderMain(); }
+}
+
+function applyLoginLang(){
+  document.getElementById('lang-select').value = currentLang;
+  document.getElementById('login-sub').textContent = t('subtitle');
+  document.getElementById('rp-doctor').textContent = t('doctorRole');
+  document.getElementById('rp-reception').textContent = t('receptionRole');
+  document.getElementById('rp-pharmacy').textContent = t('pharmacyRole');
+  document.getElementById('lbl-name').textContent = t('nameLabel');
+  document.getElementById('lbl-dept').textContent = t('deptLabel');
+  document.getElementById('login-name').placeholder = t('namePlaceholder');
+  document.getElementById('btn-start').textContent = t('start');
+  document.getElementById('login-error').textContent = t('nameRequired');
+}
+
+/* =========================================================
+   0-2. PIN 잠금 (간단한 화면 잠금 — 진짜 계정 보안은 아님)
+   ========================================================= */
+const APP_PIN = "3927";
+function checkPin(){
+  const val = document.getElementById('pin-input').value.trim();
+  if(val === APP_PIN){
+    document.getElementById('pin-gate').style.display = 'none';
+    document.getElementById('role-form').style.display = 'block';
+  } else {
+    document.getElementById('pin-error').style.display = 'block';
+    document.getElementById('pin-input').value = '';
+  }
+}
+
+/* =========================================================
+   1. 로그인 / 역할
+   ========================================================= */
+let pendingRole = 'doctor';
+function pickRole(r){
+  pendingRole = r;
+  document.querySelectorAll('.rp').forEach(el=>el.classList.toggle('active', el.dataset.role===r));
+  document.getElementById('dept-field').style.display = r==='doctor' ? 'block' : 'none';
+}
+
+let currentUser = null; // {role, name, dept, lang}
+
+function doLogin(){
+  const name = document.getElementById('login-name').value.trim();
+  if(!name){ document.getElementById('login-error').style.display='block'; return; }
+  const dept = document.getElementById('login-dept').value.trim();
+  currentUser = { role: pendingRole, name, dept: pendingRole==='doctor' ? (dept||'미지정') : '', lang: currentLang };
+  sessionStorage.setItem('emr_user', JSON.stringify(currentUser));
+  enterApp();
+}
+
+function logout(){
+  sessionStorage.removeItem('emr_user');
+  location.reload();
+}
+
+function enterApp(){
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-shell').style.display = 'block';
+  const roleLabel = currentUser.role==='doctor' ? `${currentUser.dept} · ${currentUser.name} 선생님`
+    : currentUser.role==='pharmacy' ? `약국 · ${currentUser.name}`
+    : `접수 · ${currentUser.name}`;
+  document.getElementById('whoami-label').textContent = roleLabel;
+  initSites();
+  renderNav();
+  const initialScreen = currentUser.role==='doctor' ? 'queue' : currentUser.role==='pharmacy' ? 'pharmacy' : 'reg';
+  history.replaceState({type:'screen', screen: initialScreen}, '', '#'+initialScreen);
+  suppressHistoryPush = true;
+  setScreen(initialScreen);
+  suppressHistoryPush = false;
+}
+
+window.addEventListener('popstate', function(e){
+  if(!e.state) return;
+  suppressHistoryPush = true;
+  try{
+    if(e.state.type === 'chart'){
+      openChart(e.state.patientId, e.state.waitingId);
+    } else if(e.state.type === 'screen'){
+      screenName = e.state.screen;
+      renderNav();
+      renderMain();
+    }
+  } finally {
+    suppressHistoryPush = false;
+  }
+});
+
+window.addEventListener('beforeunload', function(e){
+  e.preventDefault();
+  e.returnValue = '';
+});
+
+/* =========================================================
+   2. 인증(익명) — Firestore 접근을 위한 최소한의 인증입니다.
+   ========================================================= */
+auth.signInAnonymously().catch(err=>{
+  console.error('익명 로그인 실패', err);
+  alert('Firebase 인증에 실패했습니다.\n\n오류 내용: ' + err.code + ' / ' + err.message + '\n\n이 메시지를 캡처해서 보내주세요.');
+});
+applyLoginLang();
+
+auth.onAuthStateChanged(user=>{
+  if(user){
+    const saved = sessionStorage.getItem('emr_user');
+    if(saved){ currentUser = JSON.parse(saved); enterApp(); }
+  }
+});
+
+/* =========================================================
+   3. 사이트 관리 (확장 가능한 구조)
+   ========================================================= */
+let sites = []; // [{id, name, prefix, nextNumber}]
+let currentSiteId = null;
+
+function initSites(){
+  db.collection('sites').orderBy('name').onSnapshot(snap=>{
+    sites = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    if(sites.length===0){
+      seedDefaultSites();
+      return;
+    }
+    const sel = document.getElementById('site-select');
+    const prevValue = sel.value;
+    sel.innerHTML = sites.map(s=>`<option value="${s.id}">${s.name} (${s.prefix||'no prefix'})</option>`).join('');
+    if(sites.find(s=>s.id===prevValue)){
+      sel.value = prevValue;
+    } else {
+      const defaultSite = sites.find(s=>s.name==='클리닉');
+      if(defaultSite) sel.value = defaultSite.id;
+    }
+    currentSiteId = sel.value || sites[0].id;
+    if(screenName==='sites' || screenName==='reg') renderMain(); // 목록 갱신
+  }, err=>{
+    console.error(err);
+    alert('사이트 목록을 불러오지 못했습니다.\n\n오류 내용: ' + err.message + '\n\n이 메시지를 캡처해서 보내주세요.');
+  });
+}
+
+async function seedDefaultSites(){
+  const defaults = [
+    {name:'진료소', prefix:'H'},
+    {name:'교도소', prefix:''},
+    {name:'교회', prefix:'C'}
+  ];
+  try{
+    for(const s of defaults){
+      await db.collection('sites').add({...s, nextNumber:1});
+    }
+  }catch(err){
+    console.error(err);
+    alert('기본 사이트 생성에 실패했습니다.\n\n오류 내용: ' + err.message + '\n\n이 메시지를 캡처해서 보내주세요.');
+  }
+}
+
+function onSiteChange(){
+  currentSiteId = document.getElementById('site-select').value;
+  if(['queue','search'].includes(screenName)) renderMain();
+}
+
+async function addSite(){
+  const name = document.getElementById('new-site-name').value.trim();
+  const prefix = document.getElementById('new-site-prefix').value.trim();
+  if(!name){ alert('사이트 이름을 입력해주세요.'); return; }
+  try{
+    await db.collection('sites').add({name, prefix, nextNumber:1});
+    document.getElementById('new-site-name').value='';
+    document.getElementById('new-site-prefix').value='';
+    renderMain();
+  }catch(err){
+    console.error(err);
+    alert('사이트 추가에 실패했습니다.\n\n오류 내용: ' + err.message + '\n\n이 메시지를 캡처해서 보내주세요.');
+  }
+}
+
+async function generateRegNo(siteId){
+  const siteRef = db.collection('sites').doc(siteId);
+  let regNo;
+  await db.runTransaction(async tx=>{
+    const snap = await tx.get(siteRef);
+    const data = snap.data();
+    const next = data.nextNumber || 1;
+    regNo = (data.prefix||'') + String(next).padStart(5,'0');
+    tx.update(siteRef, {nextNumber: next+1});
+  });
+  return regNo;
+}
+
+async function syncSiteCounterIfNeeded(siteId, regNo){
+  const m = regNo.match(/(\d+)/);
+  if(!m) return;
+  const num = parseInt(m[0], 10);
+  const siteRef = db.collection('sites').doc(siteId);
+  await db.runTransaction(async tx=>{
+    const snap = await tx.get(siteRef);
+    const data = snap.data();
+    const current = data.nextNumber || 1;
+    if(num + 1 > current){
+      tx.update(siteRef, {nextNumber: num+1});
+    }
+  });
+}
+
+async function resyncSiteCounter(siteId, siteName){
+  if(!confirm(`"${siteName}" 사이트의 다음 등록번호를, 실제 등록된 환자들의 최대 번호 기준으로 다시 맞출까요?`)) return;
+  try{
+    const snap = await db.collection('patients').where('siteId','==',siteId).get();
+    let maxNum = 0;
+    snap.docs.forEach(d=>{
+      const regNo = d.data().regNo || '';
+      const m = regNo.match(/(\d+)/);
+      if(m){
+        const n = parseInt(m[0], 10);
+        if(n > maxNum) maxNum = n;
+      }
+    });
+    await db.collection('sites').doc(siteId).update({nextNumber: maxNum + 1});
+    alert(`동기화 완료. 다음 등록번호가 ${maxNum + 1}(으)로 설정되었습니다.`);
+    renderMain();
+  }catch(err){
+    alert('동기화 실패: ' + err.message);
+  }
+}
+
+/* =========================================================
+   4. 내비게이션 / 화면 전환
+   ========================================================= */
+let screenName = 'queue';
+let unsubscribeQueue = null;
+let suppressHistoryPush = false;
+
+function setScreen(s){
+  screenName = s;
+  renderNav();
+  renderMain();
+  if(!suppressHistoryPush){
+    history.pushState({type:'screen', screen:s}, '', '#'+s);
+  }
+}
+
+function renderNav(){
+  const nav = document.getElementById('nav-list');
+  if(currentUser.role === 'doctor'){
+    nav.innerHTML = `
+      <div class="nav-item ${screenName==='queue'?'active':''}" onclick="setScreen('queue')">🕒 ${t('navQueue')}</div>
+      <div class="nav-item ${screenName==='reg'?'active':''}" onclick="setScreen('reg')">➕ ${t('navReg')}</div>
+      <div class="nav-item ${screenName==='search'?'active':''}" onclick="setScreen('search')">🔍 ${t('navSearch')}</div>
+      <div class="nav-item ${screenName==='calendar'?'active':''}" onclick="setScreen('calendar')">📅 ${t('navCalendar')}</div>
+      <div class="nav-item ${screenName==='pharmacy'?'active':''}" onclick="setScreen('pharmacy')">💊 ${t('navPharmacy')}</div>
+      <div class="nav-item ${screenName==='stats'?'active':''}" onclick="setScreen('stats')">📊 ${t('navStats')}</div>
+      <div class="nav-item ${screenName==='backup'?'active':''}" onclick="setScreen('backup')">💾 데이터 백업</div>
+    `;
+  } else if(currentUser.role === 'pharmacy'){
+    nav.innerHTML = `
+      <div class="nav-item ${screenName==='pharmacy'?'active':''}" onclick="setScreen('pharmacy')">💊 ${t('navPharmacy')}</div>
+    `;
+  } else {
+    nav.innerHTML = `
+      <div class="nav-item ${screenName==='reg'?'active':''}" onclick="setScreen('reg')">➕ ${t('navReg')}</div>
+      <div class="nav-item ${screenName==='search'?'active':''}" onclick="setScreen('search')">🔍 ${t('navSearchReception')}</div>
+      <div class="nav-item ${screenName==='queue'?'active':''}" onclick="setScreen('queue')">🕒 ${t('navQueue')}</div>
+      <div class="nav-item ${screenName==='calendar'?'active':''}" onclick="setScreen('calendar')">📅 ${t('navCalendar')}</div>
+    `;
+  }
+}
+
+function renderMain(){
+  const main = document.getElementById('main');
+  if(unsubscribeQueue){ unsubscribeQueue(); unsubscribeQueue=null; }
+
+  if(screenName==='queue') renderQueue();
+  else if(screenName==='reg'){ main.innerHTML = regScreenHTML(); updateRegNoPreview(); }
+  else if(screenName==='chart') main.innerHTML = `<div class="empty-note">${t('loading')}</div>`;
+  else if(screenName==='search') main.innerHTML = searchScreenHTML();
+  else if(screenName==='sites') main.innerHTML = sitesScreenHTML();
+  else if(screenName==='calendar'){ main.innerHTML = calendarScreenHTML(); loadAppointments(); }
+  else if(screenName==='pharmacy') renderPharmacy();
+  else if(screenName==='stats'){ main.innerHTML = statsScreenHTML(); loadStats(); }
+  else if(screenName==='backup') main.innerHTML = backupScreenHTML();
+}
+
+/* =========================================================
+   5. 대기 리스트 (실시간)
+   ========================================================= */
+function renderQueue(){
+  const main = document.getElementById('main');
+  main.innerHTML = `
+    <div class="topbar"><h2>${t('queueTitle')}</h2></div>
+    <div id="queue-list" class="queue"><div class="empty-note">${t('loading')}</div></div>
+  `;
+  unsubscribeQueue = db.collection('waitingList')
+    .where('status','==','waiting')
+    .orderBy('checkinAt','asc')
+    .onSnapshot(snap=>{
+      const list = document.getElementById('queue-list');
+      if(!list) return;
+      if(snap.empty){ list.innerHTML = `<div class="empty-note">${t('emptyQueue')}</div>`; return; }
+      list.innerHTML = snap.docs.map(d=>{
+        const w = d.data();
+        const chronicBadges = (w.chronicTags||[]).map(tag=>`<span class="badge-chronic">${tag}</span>`).join('');
+        return `
+          <div class="queue-card" onclick="openChart('${w.patientId}','${d.id}')">
+            <div class="qc-info">
+              <div class="name">${w.name}${chronicBadges}</div>
+              <div class="meta">${w.gender||''} · ${ageLabel(w.age)} · ${w.siteName}</div>
+            </div>
+            <div class="qc-regno mono">${w.regNo}</div>
+            <button class="btn small outline" style="color:var(--rust); border-color:var(--rust);" onclick="event.stopPropagation(); removeFromQueue('${d.id}')">삭제</button>
+          </div>`;
+      }).join('');
+    }, err=>{
+      document.getElementById('queue-list').innerHTML =
+        `<div class="empty-note">목록을 불러오지 못했습니다. Firestore 색인(index) 생성이 필요할 수 있습니다. 아래 링크를 눌러 색인을 만들어주세요.<br>${linkify(err.message)}</div>`;
+    });
+}
+
+async function removeFromQueue(waitingId){
+  if(!confirm('이 환자를 대기 리스트에서 삭제할까요? (접수 내역만 지워지고, 환자 정보·이전 진료기록은 그대로 남습니다)')) return;
+  try{
+    await db.collection('waitingList').doc(waitingId).delete();
+  }catch(err){
+    alert('삭제 실패: ' + err.message);
+  }
+}
+
+/* =========================================================
+   6. 신규 환자 등록
+   ========================================================= */
+function regScreenHTML(){
+  if(sites.length===0){
+    return `
+      <div class="topbar"><h2>${t('regTitle')}</h2></div>
+      <div class="note">사이트 목록을 불러오는 중입니다. 몇 초 후 왼쪽 메뉴에서 "${t('navReg')}"을 다시 눌러주세요. 계속 이 화면이면 인터넷 연결 또는 Firebase 설정을 확인해주세요.</div>
+    `;
+  }
+  const siteOptions = sites.map(s=>`<option value="${s.id}" ${s.id===currentSiteId?'selected':''}>${s.name}</option>`).join('');
+  return `
+    <div class="topbar"><h2>${t('regTitle')}</h2></div>
+    <div class="card">
+      <h3>${t('personalInfo')}</h3>
+      <div class="grid2">
+        <div class="field"><label>${t('name')}</label><input id="r-name"></div>
+        <div class="field"><label>${t('gender')}</label><select id="r-gender"><option>${t('female')}</option><option>${t('male')}</option></select></div>
+        <div class="field"><label>${t('age')}</label><input id="r-age" type="text" placeholder="예: 35 또는 10개월"></div>
+        <div class="field"><label>${t('phone')}</label><input id="r-phone"></div>
+        <div class="field"><label>${t('site')}</label><select id="r-site" onchange="updateRegNoPreview()">${siteOptions}</select></div>
+      </div>
+      <div class="field" style="margin-top:6px;">
+        <label>얼굴 사진 (신원 확인용)</label>
+        <input type="file" id="r-photo" accept="image/*" capture="user">
+      </div>
+      <div id="next-regno-preview" class="note" style="margin-top:10px; margin-bottom:0;"></div>
+      <div class="chk" style="display:inline-flex; margin-top:10px;">
+        <input type="checkbox" id="r-manual-regno-toggle" onchange="document.getElementById('r-manual-regno-wrap').style.display=this.checked?'block':'none'; document.getElementById('next-regno-preview').style.display=this.checked?'none':'block';">
+        <label style="margin:0; cursor:pointer;" for="r-manual-regno-toggle">${t('manualReg')}</label>
+      </div>
+      <div id="r-manual-regno-wrap" style="display:none; margin-top:8px;">
+        <div class="field"><label>등록번호 (기존 종이차트 번호 등)</label><input id="r-manual-regno" placeholder="예: H00042"></div>
+      </div>
+      <div class="chk" style="display:inline-flex; margin-top:8px; background:#F3DCD3;">
+        <input type="checkbox" id="r-test-patient-toggle" onchange="onTestPatientToggle()">
+        <label style="margin:0; cursor:pointer;" for="r-test-patient-toggle">테스트용 환자 (통계 제외, 등록번호 카운터에 영향 없음)</label>
+      </div>
+    </div>
+    <div class="card">
+      <h3>${t('history')}</h3>
+      <div class="checks">
+        <div class="chk"><input type="checkbox" id="r-h-htn">${t('htn')}</div>
+        <div class="chk"><input type="checkbox" id="r-h-dm">${t('dm')}</div>
+        <div class="chk"><input type="checkbox" id="r-h-tb">${t('tb')}</div>
+        <div class="chk"><input type="checkbox" id="r-h-hep">${t('hep')}</div>
+        <div class="chk"><input type="checkbox" id="r-h-hiv">${t('hiv')}</div>
+        <div class="chk"><input type="checkbox" id="r-h-allergy">${t('allergy')}</div>
+        <div class="chk"><input type="checkbox" id="r-h-surgery">${t('surgery')}</div>
+      </div>
+      <div class="field"><label>${t('etc')}</label><textarea id="r-h-note" rows="2"></textarea></div>
+    </div>
+    <div class="card">
+      <h3>${t('measure')}</h3>
+      <div class="grid2">
+        <div class="field"><label>${t('bp')}</label><input id="r-bp" placeholder="예: 138/86"></div>
+        <div class="field"><label>${t('weight')}</label><input id="r-weight" type="number"></div>
+      </div>
+    </div>
+    <button class="btn" id="submit-reg-btn" style="width:auto;" onclick="submitRegistration()">${t('submitReg')}</button>
+  `;
+}
+
+function updateRegNoPreview(){
+  const el = document.getElementById('next-regno-preview');
+  const sel = document.getElementById('r-site');
+  if(!el || !sel) return;
+  const site = sites.find(s=>s.id===sel.value);
+  if(!site){ el.textContent = ''; return; }
+  const next = site.nextNumber || 1;
+  const preview = (site.prefix||'') + String(next).padStart(5,'0');
+  el.textContent = `이 사이트의 다음 등록번호: ${preview}`;
+}
+
+function onTestPatientToggle(){
+  const testChecked = document.getElementById('r-test-patient-toggle').checked;
+  const manualToggle = document.getElementById('r-manual-regno-toggle');
+  if(testChecked){
+    manualToggle.checked = true;
+    manualToggle.disabled = true;
+    document.getElementById('r-manual-regno-wrap').style.display = 'block';
+    document.getElementById('next-regno-preview').style.display = 'none';
+    const manualInput = document.getElementById('r-manual-regno');
+    if(!manualInput.value) manualInput.value = 'H99999';
+  } else {
+    manualToggle.disabled = false;
+  }
+}
+
+async function submitRegistration(){
+  const name = document.getElementById('r-name').value.trim();
+  if(!name){ alert('이름을 입력해주세요.'); return; }
+  const siteId = document.getElementById('r-site').value;
+  const site = sites.find(s=>s.id===siteId);
+  if(!site){ alert('사이트를 아직 불러오지 못했습니다. 잠시 후 다시 시도해주세요.'); return; }
+
+  const btn = document.getElementById('submit-reg-btn');
+  btn.disabled = true;
+  btn.textContent = '등록 중...';
+
+  try{
+    const gender = document.getElementById('r-gender').value;
+    const age = document.getElementById('r-age').value;
+    const phone = document.getElementById('r-phone').value;
+
+    const history = {
+      hypertension: document.getElementById('r-h-htn').checked,
+      diabetes: document.getElementById('r-h-dm').checked,
+      tb: document.getElementById('r-h-tb').checked,
+      hepatitis: document.getElementById('r-h-hep').checked,
+      hiv: document.getElementById('r-h-hiv').checked,
+      drugAllergy: document.getElementById('r-h-allergy').checked,
+      surgery: document.getElementById('r-h-surgery').checked
+    };
+    const historyNote = document.getElementById('r-h-note').value;
+    const bp = document.getElementById('r-bp').value;
+    const weight = document.getElementById('r-weight').value;
+
+    const isManual = document.getElementById('r-manual-regno-toggle').checked;
+    const isTestPatient = document.getElementById('r-test-patient-toggle').checked;
+    const regNo = isManual
+      ? document.getElementById('r-manual-regno').value.trim()
+      : await generateRegNo(siteId);
+    if(!regNo){ alert('등록번호를 입력해주세요.'); btn.disabled=false; btn.textContent=t('submitReg'); return; }
+    if(isManual && !isTestPatient){
+      await syncSiteCounterIfNeeded(siteId, regNo);
+    }
+
+    let photoURL = null;
+    const photoFile = document.getElementById('r-photo').files[0];
+    if(photoFile){
+      const path = `patients/${regNo}_${Date.now()}_${photoFile.name}`;
+      const ref = storage.ref().child(path);
+      await ref.put(photoFile);
+      photoURL = await ref.getDownloadURL();
+    }
+
+    const patientRef = await db.collection('patients').add({
+      name, gender, age, phone, siteId, siteName: site.name, regNo, photoURL,
+      history, historyNote, testPatient: isTestPatient,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    await patientRef.collection('visits').add({
+      date: firebase.firestore.FieldValue.serverTimestamp(),
+      bp, weight, progressNote:'(초진 등록)', prescription:'', plan:'',
+      createdBy: { name: currentUser.name, dept: currentUser.dept||'' }
+    });
+
+    const chronicTags = [];
+    if(history.hypertension) chronicTags.push('고혈압');
+    if(history.diabetes) chronicTags.push('당뇨');
+
+    await db.collection('waitingList').add({
+      patientId: patientRef.id, siteId, siteName: site.name, regNo, name, gender, age,
+      chronicTags, status:'waiting', checkinAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    alert(`등록 완료: ${regNo}`);
+    setScreen('queue');
+  }catch(err){
+    console.error(err);
+    alert('환자 등록에 실패했습니다.\n\n오류 내용: ' + err.message + '\n\n이 메시지를 캡처해서 보내주세요.');
+    btn.disabled = false;
+    btn.textContent = t('submitReg');
+  }
+}
+
+/* =========================================================
+   7. 환자 검색 / 재방문 접수
+   ========================================================= */
+function searchScreenHTML(){
+  const siteOptions = `<option value="">전체 사이트</option>` + sites.map(s=>`<option value="${s.id}" ${s.id===currentSiteId?'selected':''}>${s.name}</option>`).join('');
+  return `
+    <div class="topbar"><h2>${currentUser.role==='doctor'?t('searchTitle'):t('searchTitleReception')}</h2></div>
+    <div class="card">
+      <div class="grid2">
+        <div class="field"><label>등록번호 또는 이름</label><input id="search-q" placeholder="${t('searchPlaceholder')}"></div>
+        <div class="field"><label>사이트</label><select id="search-site">${siteOptions}</select></div>
+      </div>
+      <button class="btn small" onclick="doSearch()">${t('search')}</button>
+    </div>
+    <div id="search-results" class="queue"></div>
+  `;
+}
+
+let allPatientsCache = null;
+let allPatientsCacheTime = 0;
+
+async function getAllPatientsCached(){
+  const now = Date.now();
+  if(allPatientsCache && (now - allPatientsCacheTime) < 60000){
+    return allPatientsCache; // 1분간 캐시 재사용 (검색할 때마다 매번 전체를 새로 불러오지 않도록)
+  }
+  const snap = await db.collection('patients').get();
+  allPatientsCache = snap.docs.map(d=>({id:d.id, ...d.data()}));
+  allPatientsCacheTime = now;
+  return allPatientsCache;
+}
+
+async function doSearch(){
+  const q = document.getElementById('search-q').value.trim();
+  const siteFilter = document.getElementById('search-site').value;
+  const results = document.getElementById('search-results');
+  if(!q){ results.innerHTML=''; return; }
+  results.innerHTML = `<div class="empty-note">${t('loading')}</div>`;
+
+  const patients = await getAllPatientsCached();
+  const qLower = q.toLowerCase();
+  const matched = patients.filter(p =>
+    (siteFilter === '' || p.siteId === siteFilter) &&
+    ((p.name && p.name.toLowerCase().includes(qLower)) ||
+     (p.regNo && p.regNo.toLowerCase().includes(qLower)))
+  ).slice(0, 30);
+
+  if(matched.length===0){ results.innerHTML = `<div class="empty-note">${t('noResults')}</div>`; return; }
+
+  results.innerHTML = matched.map(p=>{
+    return `
+      <div class="queue-card">
+        <div class="qc-info">
+          <div class="name">${p.name}</div>
+          <div class="meta">${p.gender||''} · ${ageLabel(p.age)} · ${p.siteName}</div>
+        </div>
+        <div class="qc-regno mono">${p.regNo}</div>
+        ${currentUser.role==='doctor' ? `<button class="btn small outline" onclick="openChart('${p.id}', null)">차트 보기</button>` : ''}
+        <button class="btn small" onclick="checkInExisting('${p.id}')">${t('checkIn')}</button>
+      </div>`;
+  }).join('');
+}
+
+async function checkInExisting(patientId){
+  const doc = await db.collection('patients').doc(patientId).get();
+  const p = doc.data();
+  const chronicTags = [];
+  if(p.history?.hypertension) chronicTags.push('고혈압');
+  if(p.history?.diabetes) chronicTags.push('당뇨');
+  await db.collection('waitingList').add({
+    patientId, siteId:p.siteId, siteName:p.siteName, regNo:p.regNo, name:p.name, gender:p.gender, age:p.age,
+    chronicTags, status:'waiting', checkinAt: firebase.firestore.FieldValue.serverTimestamp()
+  });
+  alert('대기 리스트에 등록되었습니다.');
+  setScreen('queue');
+}
+
+/* =========================================================
+   8. 진료 차트
+   ========================================================= */
+let activePatientId = null;
+let activeWaitingId = null;
+let activePatientData = null;
+let presets = [];
+
+db.collection('presets').orderBy('createdAt','desc').onSnapshot(snap=>{
+  presets = snap.docs.map(d=>({id:d.id, ...d.data()}));
+  const holder = document.getElementById('rx-preset-holder');
+  if(holder) holder.innerHTML = presetChipsHTML();
+});
+
+function presetChipsHTML(){
+  return presets.map(p=>`<div class="rx-chip" onclick="applyPreset('${p.id}')">📋 ${p.name}</div>`).join('')
+    + `<div class="rx-chip" onclick="saveCurrentAsPreset()">+ 새 세트 저장</div>`;
+}
+function applyPreset(id){
+  const p = presets.find(x=>x.id===id);
+  if(!p) return;
+  const tbody = document.getElementById('rx-table-body');
+  if(tbody) tbody.innerHTML = '';
+  rxRowCount = 0;
+  (p.items||[]).forEach(item => addRxRow(item));
+  if(!p.items || p.items.length===0) addRxRow();
+}
+async function saveCurrentAsPreset(){
+  const items = collectRxRows();
+  if(items.length===0){ alert('먼저 처방 내용을 입력해주세요.'); return; }
+  const name = prompt('이 처방 세트의 이름을 입력하세요 (예: 고혈압 기본세트)');
+  if(!name) return;
+  await db.collection('presets').add({name, items, createdAt: firebase.firestore.FieldValue.serverTimestamp()});
+}
+
+function repeatLastPrescription(){
+  // 이 환자의 이전 진료 기록 중 가장 최근에 처방이 있었던 것을 찾음 (activeVisitsCache는 날짜 오름차순)
+  for(let i = activeVisitsCache.length - 1; i >= 0; i--){
+    const v = activeVisitsCache[i];
+    if(v.prescriptionItems && v.prescriptionItems.length){
+      const tbody = document.getElementById('rx-table-body');
+      if(tbody) tbody.innerHTML = '';
+      rxRowCount = 0;
+      v.prescriptionItems.forEach(item => addRxRow(item, true));
+      alert(`${fmtDate(v.date)} 처방을 불러왔습니다. 필요하면 수정 후 진료를 완료해주세요.`);
+      return;
+    }
+  }
+  alert('반복할 이전 처방 기록이 없습니다.');
+}
+
+async function openChart(patientId, waitingId){
+  activePatientId = patientId;
+  activeWaitingId = waitingId;
+  screenName = 'chart';
+  renderNav();
+  const main = document.getElementById('main');
+  main.innerHTML = `<div class="empty-note">불러오는 중...</div>`;
+
+  const pDoc = await db.collection('patients').doc(patientId).get();
+  const patient = pDoc.data();
+  activePatientData = patient;
+  const visitsSnap = await db.collection('patients').doc(patientId).collection('visits')
+    .orderBy('date','asc').limit(100).get();
+  const visits = visitsSnap.docs.map(d=>({id:d.id, ...d.data()}));
+  activeVisitsCache = visits;
+
+  main.innerHTML = chartScreenHTML(patient, visits);
+  rxRowCount = 0;
+  addRxRow(null, true);
+  const noteEl = document.getElementById('v-note');
+  if(noteEl) noteEl.focus();
+
+  if(!suppressHistoryPush){
+    history.pushState({type:'chart', patientId, waitingId}, '', '#chart');
+  }
+}
+
+let activeVisitsCache = [];
+let rxRowCount = 0;
+
+function backupScreenHTML(){
+  return `
+    <div class="topbar"><h2>데이터 백업</h2></div>
+    <div class="note">환자 데이터, 진료기록, 처방, 사이트 설정 등 전체 내용을 하나의 파일(JSON)로 내려받습니다. 한 달에 한 번 정도, 또는 중요한 변경 전에 눌러서 안전한 곳(개인 클라우드, USB 등)에 보관해두시길 권장드려요.</div>
+    <div class="card">
+      <h3>전체 데이터 내보내기</h3>
+      <button class="btn" id="backup-btn" style="width:auto;" onclick="exportAllData()">전체 데이터 백업 다운로드</button>
+    </div>
+    <div class="card">
+      <h3>기존 종이차트 가져온 환자 표시 (1회 실행용)</h3>
+      <p style="font-size:12.5px; color:var(--ink-soft);">일괄 가져오기로 등록한 환자들은 통계에서 항상 "재진"으로 취급되어야 합니다. 아직 진료 기록이 하나도 없는(= 방문 이력 없이 등록만 된) 환자를 찾아 표시합니다. 한 번만 실행하면 됩니다.</p>
+      <button class="btn small outline" id="mark-imported-btn" onclick="markImportedPatients()">가져온 환자 표시하기</button>
+    </div>
+    <div class="card">
+      <h3>중복 등록번호 정리</h3>
+      <p style="font-size:12.5px; color:var(--ink-soft);">같은 등록번호로 환자가 두 번 이상 등록되어 있는 경우를 찾아서, 진료기록이 가장 많은 하나만 남기고 나머지를 삭제합니다. 정리 후 "사이트 관리"에서 번호 동기화를 한 번씩 눌러주시는 걸 권장해요.</p>
+      <button class="btn small outline" id="dedupe-btn" onclick="cleanupDuplicatePatients()">중복 등록번호 정리하기</button>
+      <div id="dedupe-log" style="margin-top:10px; font-size:12px; color:var(--ink-soft); white-space:pre-wrap;"></div>
+    </div>
+  `;
+}
+
+async function cleanupDuplicatePatients(){
+  if(!confirm('중복된 등록번호를 찾아서 정리할까요? 각 그룹에서 진료기록이 가장 많은 하나만 남기고 나머지는 영구 삭제됩니다.')) return;
+  const btn = document.getElementById('dedupe-btn');
+  const log = document.getElementById('dedupe-log');
+  btn.disabled = true;
+  btn.textContent = '확인 중...';
+  log.textContent = '';
+  try{
+    const snap = await db.collection('patients').get();
+    const groups = {};
+    snap.docs.forEach(d=>{
+      const key = d.data().regNo || '(등록번호 없음)';
+      if(!groups[key]) groups[key] = [];
+      groups[key].push(d);
+    });
+
+    const dupKeys = Object.keys(groups).filter(k => groups[k].length > 1);
+    log.textContent = `중복된 등록번호: ${dupKeys.length}건 발견\n`;
+
+    let removed = 0;
+    for(const regNo of dupKeys){
+      const docs = groups[regNo];
+      const withCounts = await Promise.all(docs.map(async d=>{
+        const vsnap = await d.ref.collection('visits').get();
+        return {doc:d, count:vsnap.size};
+      }));
+      withCounts.sort((a,b)=>b.count-a.count);
+      const toRemove = withCounts.slice(1);
+      for(const item of toRemove){
+        const vsnap = await item.doc.ref.collection('visits').get();
+        for(const v of vsnap.docs) await v.ref.delete();
+        await item.doc.ref.delete();
+        removed++;
+      }
+      log.textContent += `${regNo}: ${docs.length}건 중 ${toRemove.length}건 삭제\n`;
+    }
+    log.textContent += `=== 완료: 총 ${removed}건 삭제됨 ===`;
+    alert(`정리 완료: 중복 ${removed}건을 삭제했습니다.`);
+  }catch(err){
+    alert('정리 실패: ' + err.message);
+    log.textContent += '오류: ' + err.message;
+  }
+  btn.disabled = false;
+  btn.textContent = '중복 등록번호 정리하기';
+}
+
+async function markImportedPatients(){
+  const btn = document.getElementById('mark-imported-btn');
+  if(!confirm('진료 기록이 없는 환자를 모두 "가져온 환자(재진 처리)"로 표시할까요?')) return;
+  btn.disabled = true;
+  btn.textContent = '확인 중...';
+  try{
+    const patientsSnap = await db.collection('patients').get();
+    let marked = 0;
+    const targets = [];
+    for(const doc of patientsSnap.docs){
+      if(doc.data().imported) continue; // 이미 처리됨
+      const visitsSnap = await doc.ref.collection('visits').limit(1).get();
+      if(visitsSnap.empty) targets.push(doc.ref);
+    }
+    for(let i=0; i<targets.length; i+=400){
+      const batch = db.batch();
+      targets.slice(i,i+400).forEach(ref => batch.update(ref, {imported:true}));
+      await batch.commit();
+      marked += Math.min(400, targets.length - i);
+    }
+    alert(`완료: ${marked}명을 가져온 환자(재진)로 표시했습니다.`);
+  }catch(err){
+    alert('처리 실패: ' + err.message);
+  }
+  btn.disabled = false;
+  btn.textContent = '가져온 환자 표시하기';
+}
+
+async function exportAllData(){
+  const btn = document.getElementById('backup-btn');
+  btn.disabled = true;
+  btn.textContent = '백업 파일 만드는 중...';
+  try{
+    const data = {};
+    for(const col of ['sites','waitingList','presets','appointments','pharmacyQueue']){
+      const snap = await db.collection(col).get();
+      data[col] = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    }
+    const patientsSnap = await db.collection('patients').get();
+    data.patients = [];
+    for(const p of patientsSnap.docs){
+      const visitsSnap = await p.ref.collection('visits').get();
+      data.patients.push({ id:p.id, ...p.data(), visits: visitsSnap.docs.map(v=>({id:v.id, ...v.data()})) });
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `emr_backup_${new Date().toISOString().slice(0,10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }catch(err){
+    alert('백업 실패: ' + err.message);
+  }
+  btn.disabled = false;
+  btn.textContent = '전체 데이터 백업 다운로드';
+}
+
+function linkify(text){
+  return String(text).replace(/(https?:\/\/[^\s]+)/g, url => `<a href="${url}" target="_blank" style="color:var(--teal); word-break:break-all;">${url}</a>`);
+}
+
+function ageLabel(age){
+  if(age===undefined || age===null || age==='') return '';
+  const s = String(age).trim();
+  if(/^\d+$/.test(s)) return s + '세'; // 순수 숫자면 '세' 붙임
+  return s; // '10개월'처럼 이미 단위가 포함된 경우 그대로 표시
+}
+
+function parseAgeYears(age){
+  if(age===undefined || age===null || age==='') return NaN;
+  const s = String(age).trim();
+  if(/개월|mo/i.test(s)) return 0; // 1세 미만 영아는 0-9세 그룹으로 집계
+  const n = parseInt(s);
+  return isNaN(n) ? NaN : n;
+}
+
+function fmtDate(ts){
+  if(!ts || !ts.toDate) return '-';
+  const d = ts.toDate();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+const RX_FREQ_OPTIONS = [
+  {v:'QD', l:'QD · 1일 1회'}, {v:'BID', l:'BID · 1일 2회'}, {v:'TID', l:'TID · 1일 3회'},
+  {v:'QID', l:'QID · 1일 4회'}, {v:'QOD', l:'QOD · 격일 1회'}, {v:'PRN', l:'PRN · 필요시'}
+];
+const RX_TIMING_OPTIONS = [
+  {v:'AC', l:'AC · 식전'}, {v:'PC', l:'PC · 식후'}, {v:'AM', l:'AM · 기상 후'},
+  {v:'HS', l:'HS · 취침 전'}, {v:'PRN', l:'PRN · 필요시'}, {v:'STAT', l:'STAT · 즉시'}
+];
+
+function rxOptionsHTML(list, selected){
+  return list.map(o=>`<option value="${o.v}" ${o.v===selected?'selected':''}>${o.l}</option>`).join('');
+}
+
+function rxRowHTML(idx, item){
+  item = item || {};
+  return `
+    <tr id="rx-row-${idx}">
+      <td><input id="rx-drug-${idx}" placeholder="약품명" value="${item.drug||''}" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:5px;"></td>
+      <td><input id="rx-dose-${idx}" placeholder="예: 500mg" value="${item.dose||''}" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:5px;"></td>
+      <td><select id="rx-freq-${idx}" style="width:100%; padding:5px;">${rxOptionsHTML(RX_FREQ_OPTIONS, item.freq)}</select></td>
+      <td><input id="rx-dur-${idx}" type="number" placeholder="일수" value="${item.duration||''}" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:5px;"></td>
+      <td><select id="rx-timing-${idx}" style="width:100%; padding:5px;">${rxOptionsHTML(RX_TIMING_OPTIONS, item.timing)}</select></td>
+      <td><input id="rx-note-${idx}" placeholder="약국 참고사항" value="${item.note||''}" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:5px;"></td>
+      <td><span style="cursor:pointer; color:var(--rust);" onclick="removeRxRow(${idx})">✕</span></td>
+    </tr>`;
+}
+
+function addRxRow(item, noFocus){
+  const idx = rxRowCount++;
+  const tbody = document.getElementById('rx-table-body');
+  if(!tbody) return;
+  tbody.insertAdjacentHTML('beforeend', rxRowHTML(idx, item));
+  if(!noFocus){
+    const drugInput = document.getElementById(`rx-drug-${idx}`);
+    if(drugInput) drugInput.focus();
+  }
+}
+
+function removeRxRow(idx){
+  const row = document.getElementById(`rx-row-${idx}`);
+  if(row) row.remove();
+}
+
+function collectRxRows(){
+  const rows = [];
+  const tbody = document.getElementById('rx-table-body');
+  if(!tbody) return rows;
+  tbody.querySelectorAll('tr').forEach(tr=>{
+    const idx = tr.id.replace('rx-row-','');
+    const drug = document.getElementById(`rx-drug-${idx}`)?.value.trim();
+    if(!drug) return;
+    rows.push({
+      drug,
+      dose: document.getElementById(`rx-dose-${idx}`)?.value.trim() || '',
+      freq: document.getElementById(`rx-freq-${idx}`)?.value || '',
+      duration: document.getElementById(`rx-dur-${idx}`)?.value || '',
+      timing: document.getElementById(`rx-timing-${idx}`)?.value || '',
+      note: document.getElementById(`rx-note-${idx}`)?.value.trim() || ''
+    });
+  });
+  return rows;
+}
+
+function rxItemsToText(items){
+  return (items||[]).map(i => `${i.drug} ${i.dose||''} ${i.freq||''} ${i.timing||''} ${i.duration?('x'+i.duration+'일'):''}${i.note?(' ['+i.note+']'):''}`.replace(/\s+/g,' ').trim()).join('\n');
+}
+
+function rxItemsToTableHTML(items){
+  if(!items || items.length===0) return '';
+  const rows = items.map(i=>`
+    <tr><td>${i.drug}</td><td>${i.dose||'-'}</td><td>${i.freq||'-'}</td><td>${i.timing||'-'}</td><td>${i.duration?i.duration+'일':'-'}</td><td>${i.note||'-'}</td></tr>
+  `).join('');
+  return `<table class="chronic-table" style="margin-top:6px;">
+    <tr><th>약품명</th><th>용량</th><th>빈도</th><th>시기</th><th>기간</th><th>기타사항</th></tr>${rows}
+  </table>`;
+}
+
+function historyTagsHTML(h){
+  h = h || {};
+  const tags = [];
+  if(h.hypertension) tags.push('<span class="tag warn">고혈압</span>');
+  if(h.diabetes) tags.push('<span class="tag warn">당뇨</span>');
+  if(h.tb) tags.push('<span class="tag">폐결핵</span>');
+  if(h.hepatitis) tags.push('<span class="tag">간염</span>');
+  if(h.hiv) tags.push('<span class="tag">HIV</span>');
+  if(h.drugAllergy) tags.push('<span class="tag warn">약물 알레르기</span>');
+  if(h.surgery) tags.push('<span class="tag">수술력</span>');
+  return tags.join('') || '<span class="tag">특이 과거력 없음</span>';
+}
+
+function chartScreenHTML(patient, visits){
+  const h = patient.history || {};
+
+  const latest = visits[visits.length-1] || {};
+  const showFlowsheet = h.hypertension || h.diabetes;
+  const flowRows = visits.filter(v=>v.bp || v.glucose).slice(-10).map(v=>`
+    <tr><td>${fmtDate(v.date)}</td><td>${v.bp||'-'}</td><td>${v.glucose||'-'}</td><td>${v.weight||'-'}</td><td>${(v.progressNote||'').slice(0,30)}</td></tr>
+  `).join('');
+
+  return `
+    <div class="chart-head">
+      <div style="flex:1;">
+        <div class="chart-name" id="pinfo-view">${patient.name} <span class="mono" style="font-size:12px; color:var(--ink-soft); font-weight:400;">${patient.regNo}</span>
+          <span class="hist-edit-toggle" style="font-size:11px; margin-left:8px;" onclick="togglePatientInfoEdit()">정보수정</span>
+        </div>
+        <div id="pinfo-edit" style="display:none; margin:8px 0;">
+          <div class="grid2">
+            <div class="field"><label>이름</label><input id="p-name" value="${patient.name||''}"></div>
+            <div class="field"><label>등록번호</label><input id="p-regno" value="${patient.regNo||''}"></div>
+            <div class="field"><label>성별</label><select id="p-gender"><option ${patient.gender==='여'?'selected':''}>여</option><option ${patient.gender==='남'?'selected':''}>남</option></select></div>
+            <div class="field"><label>나이</label><input id="p-age" type="text" placeholder="예: 35 또는 10개월" value="${patient.age||''}"></div>
+            <div class="field"><label>연락처</label><input id="p-phone" value="${patient.phone||''}"></div>
+          </div>
+          <button class="btn small" onclick="savePatientInfo()">저장</button>
+        </div>
+        <div class="chart-meta" id="chart-meta-row">${patient.gender||''} · ${ageLabel(patient.age)} · ${patient.siteName}</div>
+        <div class="tag-row" id="chart-tag-row">${historyTagsHTML(h)}</div>
+      </div>
+      ${patient.photoURL ? `<img src="${patient.photoURL}" style="width:150px; height:150px; border-radius:10px; object-fit:cover; margin:0 12px;">` : ''}
+      <div style="display:flex; flex-direction:column; gap:6px;">
+        <button class="btn small outline" onclick="completeVisit()">진료 완료 처리</button>
+        <button class="btn small outline" style="color:var(--rust); border-color:var(--rust);" onclick="deletePatient()">환자 삭제</button>
+      </div>
+    </div>
+
+    <div class="vitals-strip">
+      <div class="vital"><div class="v">${latest.bp||'-'}</div><div class="l">최근 혈압</div></div>
+      <div class="vital"><div class="v">${latest.glucose||'-'}</div><div class="l">최근 공복혈당</div></div>
+      <div class="vital"><div class="v">${latest.weight||'-'}</div><div class="l">최근 체중 kg</div></div>
+    </div>
+
+    <div class="card">
+      <div class="hist-edit-row"><h3 style="margin:0; border:none; padding:0;">과거력</h3><span class="hist-edit-toggle" onclick="toggleHistEdit()" id="hist-toggle-label">수정</span></div>
+      <div id="hist-view"><p style="font-size:13px; color:var(--ink-soft); margin-top:10px;">기타사항: ${patient.historyNote || '-'}</p></div>
+      <div id="hist-edit" style="display:none;">
+        <div class="checks" style="margin:10px 0;">
+          <div class="chk"><input type="checkbox" id="e-h-htn" ${h.hypertension?'checked':''}>고혈압</div>
+          <div class="chk"><input type="checkbox" id="e-h-dm" ${h.diabetes?'checked':''}>당뇨</div>
+          <div class="chk"><input type="checkbox" id="e-h-tb" ${h.tb?'checked':''}>폐결핵</div>
+          <div class="chk"><input type="checkbox" id="e-h-hep" ${h.hepatitis?'checked':''}>간염</div>
+          <div class="chk"><input type="checkbox" id="e-h-hiv" ${h.hiv?'checked':''}>에이즈</div>
+          <div class="chk"><input type="checkbox" id="e-h-allergy" ${h.drugAllergy?'checked':''}>약물 알레르기</div>
+          <div class="chk"><input type="checkbox" id="e-h-surgery" ${h.surgery?'checked':''}>수술력</div>
+        </div>
+        <div class="field"><label>기타사항</label><textarea id="e-h-note" rows="2">${patient.historyNote||''}</textarea></div>
+        <button class="btn small" onclick="saveHistory()">과거력 저장</button>
+      </div>
+    </div>
+
+    ${showFlowsheet ? `
+    <div class="card">
+      <h3>만성질환 흐름표</h3>
+      <table class="chronic-table"><tr><th>날짜</th><th>혈압</th><th>공복혈당(FBS)</th><th>체중</th><th>비고</th></tr>${flowRows || '<tr><td colspan="5">기록 없음</td></tr>'}</table>
+    </div>` : ''}
+
+    <div class="card">
+      <h3>오늘 진료 기록 작성</h3>
+      <div class="grid2" style="margin-bottom:12px;">
+        <div class="field"><label>혈압</label><input id="v-bp" placeholder="예: 138/86"></div>
+        <div class="field"><label>체중 (kg)</label><input id="v-weight" type="number"></div>
+        <div class="field"><label>공복혈당 (FBS, mg/dL)</label><input id="v-glucose" type="number" placeholder="예: 110"></div>
+      </div>
+      <div class="field"><label>Progress Note</label><textarea id="v-note" rows="6" lang="en"></textarea></div>
+      <div class="field">
+        <label>처방</label>
+        <div class="rx-preset" id="rx-preset-holder">${presetChipsHTML()}</div>
+        <table class="chronic-table" style="margin-bottom:8px;">
+          <tr><th>약품명</th><th>1회 투약량</th><th>1일 횟수</th><th>총 투약일</th><th>투약 시기</th><th>기타사항</th><th></th></tr>
+          <tbody id="rx-table-body"></tbody>
+        </table>
+        <button class="btn small outline" onclick="addRxRow()">+ 약 추가</button>
+        <button class="btn small outline" onclick="repeatLastPrescription()">🔁 지난 처방 반복</button>
+      </div>
+      <div class="field" style="margin-top:12px;">
+        <label>처방 처리 방식</label>
+        <select id="v-rx-mode">
+          <option value="direct">직접 투약 완료 (평소 진료)</option>
+          <option value="pharmacy">약국으로 전송 (단기팀 방문 시)</option>
+        </select>
+      </div>
+      <div class="field"><label>향후 계획</label><textarea id="v-plan" rows="2"></textarea></div>
+      <button class="btn small outline" type="button" onclick="toggleQuickAppt()">📅 다음 방문 예약하기</button>
+      <div id="quick-appt-form" style="display:none; background:var(--paper); padding:12px; border-radius:8px; margin-top:8px;">
+        <div class="grid2">
+          <div class="field"><label>날짜</label><input type="date" id="qa-date"></div>
+          <div class="field"><label>시간</label><input type="time" id="qa-time" value="09:00"></div>
+        </div>
+        <div class="field"><label>메모</label><textarea id="qa-note" rows="2"></textarea></div>
+        <button class="btn small" onclick="submitQuickAppt()">예약 저장</button>
+      </div>
+      <div class="field" style="margin-top:14px;">
+        <label>사진 첨부</label>
+        <input type="file" id="v-photo" accept="image/*" capture="environment">
+      </div>
+      <div class="field">
+        <label>PDF 첨부</label>
+        <input type="file" id="v-pdf" accept="application/pdf">
+      </div>
+      <div class="note" style="margin-top:10px;">별도의 저장 버튼은 없습니다 — 상단의 "진료 완료 처리"를 누르면 지금 작성한 내용이 자동으로 저장됩니다.</div>
+    </div>
+
+    <div class="card">
+      <h3>이전 진료 기록</h3>
+      <button class="btn small outline" onclick="openHistoryPanel()">이전 진료 기록 보기 (${visits.length}건)</button>
+    </div>
+  `;
+}
+
+function historyPanelTimelineHTML(){
+  if(activeVisitsCache.length===0) return '<div class="empty-note">이전 기록이 없습니다.</div>';
+  return activeVisitsCache.map(v=>`
+    <div class="timeline-entry" id="timeline-${v.id}">
+      <div class="tdate">${fmtDate(v.date)} · ${v.createdBy? (v.createdBy.dept?v.createdBy.dept+' · ':'')+v.createdBy.name : ''}
+        <span class="hist-edit-toggle" style="margin-left:8px;" onclick="toggleVisitEdit('${v.id}')">수정</span>
+      </div>
+      <div id="view-${v.id}">
+        ${v.progressNote?`<div class="tsection">Progress Note</div><p>${v.progressNote}</p>`:''}
+        ${v.prescriptionItems && v.prescriptionItems.length ? `<div class="tsection">처방</div>${rxItemsToTableHTML(v.prescriptionItems)}` : (v.prescription?`<div class="tsection">처방</div><p>${v.prescription}</p>`:'')}
+        ${v.plan?`<div class="tsection">향후계획</div><p>${v.plan}</p>`:''}
+        ${(v.photoURL || v.pdfURL) ? `<div class="tsection">첨부파일</div><div class="attach-row">
+          ${v.photoURL?`<a class="attach-chip" href="${v.photoURL}" target="_blank">📷 사진 보기</a>`:''}
+          ${v.pdfURL?`<a class="attach-chip" href="${v.pdfURL}" target="_blank">📄 PDF 보기</a>`:''}
+        </div>` : ''}
+      </div>
+      <div id="edit-${v.id}" style="display:none; background:var(--paper); padding:10px; border-radius:8px; margin-top:6px;">
+        <div class="field"><label>Progress Note</label><textarea id="ev-note-${v.id}" rows="3">${v.progressNote||''}</textarea></div>
+        <div class="field"><label>처방 (텍스트)</label><textarea id="ev-rx-${v.id}" rows="2">${v.prescription||''}</textarea></div>
+        <div class="field"><label>향후계획</label><textarea id="ev-plan-${v.id}" rows="2">${v.plan||''}</textarea></div>
+        <button class="btn small" onclick="saveVisitEdit('${v.id}')">수정 저장</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function openHistoryPanel(){
+  let panel = document.getElementById('history-panel');
+  if(!panel){
+    panel = document.createElement('div');
+    panel.id = 'history-panel';
+    panel.className = 'history-panel';
+    document.body.appendChild(panel);
+  }
+  panel.innerHTML = `
+    <div class="history-panel-head">
+      <span>이전 진료 기록</span>
+      <span style="cursor:pointer;" onclick="closeHistoryPanel()">✕ 닫기</span>
+    </div>
+    <div class="history-panel-body">${historyPanelTimelineHTML()}</div>
+  `;
+  panel.classList.add('open');
+}
+
+function closeHistoryPanel(){
+  const panel = document.getElementById('history-panel');
+  if(panel) panel.classList.remove('open');
+}
+
+function toggleVisitEdit(id){
+  const v = document.getElementById(`view-${id}`);
+  const e = document.getElementById(`edit-${id}`);
+  const editing = e.style.display !== 'none';
+  e.style.display = editing ? 'none' : 'block';
+  v.style.display = editing ? 'block' : 'none';
+}
+
+async function saveVisitEdit(id){
+  const progressNote = document.getElementById(`ev-note-${id}`).value;
+  const prescription = document.getElementById(`ev-rx-${id}`).value;
+  const plan = document.getElementById(`ev-plan-${id}`).value;
+  try{
+    await db.collection('patients').doc(activePatientId).collection('visits').doc(id).update({
+      progressNote, prescription, plan
+    });
+    alert('수정되었습니다.');
+    const idx = activeVisitsCache.findIndex(v=>v.id===id);
+    if(idx>-1){ activeVisitsCache[idx].progressNote = progressNote; activeVisitsCache[idx].prescription = prescription; activeVisitsCache[idx].plan = plan; }
+    openHistoryPanel();
+  }catch(err){
+    alert('수정 실패: ' + err.message);
+  }
+}
+
+function toggleHistEdit(){
+  const v = document.getElementById('hist-view');
+  const e = document.getElementById('hist-edit');
+  const editing = e.style.display !== 'none';
+  e.style.display = editing ? 'none' : 'block';
+  v.style.display = editing ? 'block' : 'none';
+  document.getElementById('hist-toggle-label').textContent = editing ? '수정' : '취소';
+}
+
+function togglePatientInfoEdit(){
+  const v = document.getElementById('pinfo-edit');
+  v.style.display = v.style.display === 'none' ? 'block' : 'none';
+}
+
+async function savePatientInfo(){
+  const name = document.getElementById('p-name').value.trim();
+  const regNo = document.getElementById('p-regno').value.trim();
+  const gender = document.getElementById('p-gender').value;
+  const age = document.getElementById('p-age').value;
+  const phone = document.getElementById('p-phone').value;
+  if(!name || !regNo){ alert('이름과 등록번호는 비워둘 수 없습니다.'); return; }
+  try{
+    await db.collection('patients').doc(activePatientId).update({name, regNo, gender, age, phone});
+
+    // 대기 리스트에 같은 환자가 대기 중이면 표시 정보도 함께 갱신
+    const waitingSnap = await db.collection('waitingList')
+      .where('patientId','==', activePatientId).where('status','==','waiting').get();
+    const batchUpdates = waitingSnap.docs.map(d => d.ref.update({name, regNo, gender, age}));
+    await Promise.all(batchUpdates);
+
+    // 작성 중이던 진료 기록이 사라지지 않도록 전체 화면을 다시 그리지 않고 해당 부분만 갱신
+    if(activePatientData){ Object.assign(activePatientData, {name, regNo, gender, age, phone}); }
+    const pinfoView = document.getElementById('pinfo-view');
+    if(pinfoView) pinfoView.innerHTML = `${name} <span class="mono" style="font-size:12px; color:var(--ink-soft); font-weight:400;">${regNo}</span><span class="hist-edit-toggle" style="font-size:11px; margin-left:8px;" onclick="togglePatientInfoEdit()">정보수정</span>`;
+    const metaRow = document.getElementById('chart-meta-row');
+    if(metaRow) metaRow.textContent = `${gender||''} · ${ageLabel(age)} · ${activePatientData?.siteName||''}`;
+    togglePatientInfoEdit();
+    alert('환자 정보가 저장되었습니다.');
+  }catch(err){
+    alert('저장 실패: ' + err.message);
+  }
+}
+
+async function saveHistory(){
+  const history = {
+    hypertension: document.getElementById('e-h-htn').checked,
+    diabetes: document.getElementById('e-h-dm').checked,
+    tb: document.getElementById('e-h-tb').checked,
+    hepatitis: document.getElementById('e-h-hep').checked,
+    hiv: document.getElementById('e-h-hiv').checked,
+    drugAllergy: document.getElementById('e-h-allergy').checked,
+    surgery: document.getElementById('e-h-surgery').checked
+  };
+  const historyNote = document.getElementById('e-h-note').value;
+  try{
+    await db.collection('patients').doc(activePatientId).update({history, historyNote});
+    // 작성 중이던 진료 기록(오늘 진료 기록 작성 영역)이 사라지지 않도록 전체 화면을 다시 그리지 않고
+    // 과거력 관련 부분만 갱신합니다.
+    if(activePatientData){ activePatientData.history = history; activePatientData.historyNote = historyNote; }
+    const tagRow = document.getElementById('chart-tag-row');
+    if(tagRow) tagRow.innerHTML = historyTagsHTML(history);
+    const histView = document.getElementById('hist-view');
+    if(histView) histView.innerHTML = `<p style="font-size:13px; color:var(--ink-soft); margin-top:10px;">기타사항: ${historyNote || '-'}</p>`;
+    toggleHistEdit();
+    alert('과거력이 저장되었습니다.');
+  }catch(err){
+    alert('과거력 저장 실패: ' + err.message);
+  }
+}
+
+function hasUnsavedVisitContent(){
+  const bp = document.getElementById('v-bp')?.value.trim();
+  const weight = document.getElementById('v-weight')?.value.trim();
+  const glucose = document.getElementById('v-glucose')?.value.trim();
+  const note = document.getElementById('v-note')?.value.trim();
+  const plan = document.getElementById('v-plan')?.value.trim();
+  const photo = document.getElementById('v-photo')?.files.length;
+  const pdf = document.getElementById('v-pdf')?.files.length;
+  const rxItems = collectRxRows();
+  return !!(bp || weight || glucose || note || plan || photo || pdf || rxItems.length>0);
+}
+
+function hasClinicalContent(){
+  const bp = document.getElementById('v-bp')?.value.trim();
+  const weight = document.getElementById('v-weight')?.value.trim();
+  const glucose = document.getElementById('v-glucose')?.value.trim();
+  const note = document.getElementById('v-note')?.value.trim();
+  const plan = document.getElementById('v-plan')?.value.trim();
+  const pdf = document.getElementById('v-pdf')?.files.length;
+  const rxItems = collectRxRows();
+  return !!(bp || weight || glucose || note || plan || pdf || rxItems.length>0);
+}
+
+async function saveVisit(silent){
+  try{
+    const photoFile = document.getElementById('v-photo').files[0];
+
+    // 진료 내용 없이 사진만 첨부한 경우: 진료기록을 만들지 않고 환자 사진만 갱신
+    if(!hasClinicalContent()){
+      if(photoFile){
+        const path = `patients/${activePatientId}/${Date.now()}_${photoFile.name}`;
+        const ref = storage.ref().child(path);
+        await ref.put(photoFile);
+        const photoURL = await ref.getDownloadURL();
+        await db.collection('patients').doc(activePatientId).update({photoURL});
+        if(!silent) alert('사진이 환자 정보에 저장되었습니다. (진료 기록으로는 남지 않습니다)');
+      }
+      return;
+    }
+
+    const bp = document.getElementById('v-bp').value;
+    const weight = document.getElementById('v-weight').value;
+    const glucose = document.getElementById('v-glucose').value;
+    const progressNote = document.getElementById('v-note').value;
+    const prescriptionItems = collectRxRows();
+    const prescription = rxItemsToText(prescriptionItems);
+    const plan = document.getElementById('v-plan').value;
+    const rxMode = document.getElementById('v-rx-mode').value;
+    const pdfFile = document.getElementById('v-pdf').files[0];
+
+    let photoURL = null, pdfURL = null;
+    if(photoFile){
+      const path = `patients/${activePatientId}/${Date.now()}_${photoFile.name}`;
+      const ref = storage.ref().child(path);
+      await ref.put(photoFile);
+      photoURL = await ref.getDownloadURL();
+      await db.collection('patients').doc(activePatientId).update({photoURL});
+    }
+    if(pdfFile){
+      const path = `patients/${activePatientId}/${Date.now()}_${pdfFile.name}`;
+      const ref = storage.ref().child(path);
+      await ref.put(pdfFile);
+      pdfURL = await ref.getDownloadURL();
+    }
+
+    await db.collection('patients').doc(activePatientId).collection('visits').add({
+      date: firebase.firestore.FieldValue.serverTimestamp(),
+      bp, weight, glucose, progressNote, prescription, prescriptionItems, plan, photoURL, pdfURL,
+      dispenseMode: rxMode,
+      createdBy: { name: currentUser.name, dept: currentUser.dept||'' }
+    });
+
+    if(rxMode === 'pharmacy' && prescription.trim() && activePatientData){
+      await db.collection('pharmacyQueue').add({
+        patientId: activePatientId,
+        patientName: activePatientData.name,
+        regNo: activePatientData.regNo,
+        siteName: activePatientData.siteName,
+        prescription,
+        status: 'waiting',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+
+    if(!silent){
+      alert('진료 기록이 저장되었습니다.' + (rxMode==='pharmacy' ? ' (약국으로 전송됨)' : ''));
+      openChart(activePatientId, activeWaitingId);
+    }
+  }catch(err){
+    alert('저장 실패: ' + err.message + '\n\n이 메시지를 캡처해서 보내주세요.');
+    throw err;
+  }
+}
+
+async function completeVisit(){
+  if(hasUnsavedVisitContent()){
+    try{
+      await saveVisit(true);
+    }catch(err){
+      return; // 저장 실패 시 완료 처리 중단 (기록 유실 방지)
+    }
+  }
+  if(activeWaitingId){
+    await db.collection('waitingList').doc(activeWaitingId).update({status:'done'});
+  }
+  setScreen('queue');
+}
+
+async function deletePatient(){
+  if(!activePatientData) return;
+  const confirmText = prompt(`정말 삭제하시겠습니까? 이 환자의 모든 진료기록도 함께 영구 삭제됩니다.\n확인하려면 등록번호(${activePatientData.regNo})를 그대로 입력해주세요.`);
+  if(confirmText !== activePatientData.regNo){
+    if(confirmText !== null) alert('등록번호가 일치하지 않아 취소되었습니다.');
+    return;
+  }
+  try{
+    const visitsSnap = await db.collection('patients').doc(activePatientId).collection('visits').get();
+    for(let i=0; i<visitsSnap.docs.length; i+=400){
+      const batch = db.batch();
+      visitsSnap.docs.slice(i,i+400).forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
+    const waitingSnap = await db.collection('waitingList').where('patientId','==',activePatientId).get();
+    for(const d of waitingSnap.docs){ await d.ref.delete(); }
+
+    await db.collection('patients').doc(activePatientId).delete();
+    alert('환자가 삭제되었습니다. 등록번호를 다시 정확히 맞추려면 "사이트 관리"에서 해당 사이트의 "번호 동기화"를 눌러주세요.');
+    setScreen('queue');
+  }catch(err){
+    alert('삭제 실패: ' + err.message);
+  }
+}
+
+/* =========================================================
+   9. 사이트 관리 화면
+   ========================================================= */
+function sitesScreenHTML(){
+  const rows = sites.map(s=>`
+    <div class="site-row" style="flex-wrap:wrap; gap:8px;">
+      <div style="flex:1; min-width:140px;">${s.name} <span class="prefix">${(s.prefix||'')}00000</span> <span style="font-size:11px; color:var(--ink-soft);">(다음 번호: ${(s.prefix||'')}${String(s.nextNumber||1).padStart(5,'0')})</span></div>
+      <button class="btn small outline" onclick="startRenameSite('${s.id}','${s.name.replace(/'/g,"\\'")}','${(s.prefix||'').replace(/'/g,"\\'")}')">이름/접두어 변경</button>
+      <button class="btn small outline" onclick="resyncSiteCounter('${s.id}','${s.name.replace(/'/g,"\\'")}')">번호 동기화</button>
+      <button class="btn small outline" style="color:var(--rust); border-color:var(--rust);" onclick="deleteSite('${s.id}','${s.name.replace(/'/g,"\\'")}')">삭제</button>
+    </div>
+    <div id="rename-form-${s.id}" style="display:none; padding:10px 4px 14px;">
+      <div class="grid2">
+        <div class="field"><label>사이트 이름</label><input id="rn-name-${s.id}" value="${s.name}"></div>
+        <div class="field"><label>등록번호 접두어</label><input id="rn-prefix-${s.id}" value="${s.prefix||''}"></div>
+      </div>
+      <button class="btn small" onclick="saveRenameSite('${s.id}')">저장</button>
+    </div>
+  `).join('');
+  return `
+    <div class="topbar"><h2>사이트 관리</h2></div>
+    <div class="note">사이트는 계속 추가할 수 있습니다. 등록번호는 사이트별로 자동 관리됩니다. 삭제는 해당 사이트로 등록된 환자 데이터에는 영향을 주지 않지만, 새 환자 등록 시 목록에서 사라집니다. "번호 동기화"는 실제 등록된 환자들의 최대 번호를 기준으로 다음 번호를 다시 맞춰줍니다 (직접입력 등록 후 번호가 꼬였을 때 사용).</div>
+    <div class="card"><h3>등록된 사이트</h3>${rows}</div>
+    <div class="card">
+      <h3>새 사이트 추가</h3>
+      <div class="grid2">
+        <div class="field"><label>사이트 이름</label><input id="new-site-name" placeholder="예: 이동 진료"></div>
+        <div class="field"><label>등록번호 접두어</label><input id="new-site-prefix" placeholder="예: M"></div>
+      </div>
+      <button class="btn small" onclick="addSite()">사이트 추가</button>
+    </div>
+  `;
+}
+
+function startRenameSite(id, name, prefix){
+  const el = document.getElementById(`rename-form-${id}`);
+  if(el) el.style.display = el.style.display==='none' ? 'block' : 'none';
+}
+
+async function saveRenameSite(id){
+  const name = document.getElementById(`rn-name-${id}`).value.trim();
+  const prefix = document.getElementById(`rn-prefix-${id}`).value.trim();
+  if(!name){ alert('사이트 이름을 입력해주세요.'); return; }
+  try{
+    await db.collection('sites').doc(id).update({name, prefix});
+    alert('사이트 정보가 수정되었습니다. (이미 등록된 환자의 기존 등록번호는 바뀌지 않습니다)');
+    renderMain();
+  }catch(err){
+    alert('수정 실패: ' + err.message);
+  }
+}
+
+async function deleteSite(id, name){
+  if(!confirm(`"${name}" 사이트를 삭제할까요?\n이미 등록된 환자 데이터는 지워지지 않지만, 앞으로 이 사이트로 신규 등록은 할 수 없게 됩니다.`)) return;
+  try{
+    await db.collection('sites').doc(id).delete();
+    renderMain();
+  }catch(err){
+    alert('삭제 실패: ' + err.message);
+  }
+}
+
+/* =========================================================
+   10. 예약 캘린더
+   ========================================================= */
+function calendarScreenHTML(){
+  const today = new Date().toISOString().slice(0,10);
+  const siteOptions = sites.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+  return `
+    <div class="topbar"><h2>예약 캘린더</h2></div>
+    <div class="card">
+      <div class="field"><label>날짜 선택</label><input type="date" id="cal-date" value="${today}" onchange="loadAppointments()"></div>
+    </div>
+    <div class="card">
+      <h3>해당 날짜 예약</h3>
+      <div id="appt-list"><div class="empty-note">${t('loading')}</div></div>
+    </div>
+    <div class="card">
+      <h3>새 예약 등록 (접수·진료실 모두 사용 가능)</h3>
+      <div class="grid2">
+        <div class="field"><label>환자 이름</label><input id="a-name"></div>
+        <div class="field"><label>사이트</label><select id="a-site">${siteOptions}</select></div>
+        <div class="field"><label>날짜</label><input type="date" id="a-date" value="${today}"></div>
+        <div class="field"><label>시간</label><input type="time" id="a-time" value="09:00"></div>
+      </div>
+      <div class="field"><label>메모</label><textarea id="a-note" rows="2"></textarea></div>
+      <button class="btn small" onclick="submitAppointment()">예약 등록</button>
+    </div>
+  `;
+}
+
+async function loadAppointments(){
+  const dateEl = document.getElementById('cal-date');
+  if(!dateEl) return;
+  const date = dateEl.value;
+  const list = document.getElementById('appt-list');
+  list.innerHTML = `<div class="empty-note">${t('loading')}</div>`;
+  try{
+    const snap = await db.collection('appointments').where('date','==',date).orderBy('time','asc').get();
+    if(snap.empty){ list.innerHTML = '<div class="empty-note">예약이 없습니다.</div>'; return; }
+    list.innerHTML = snap.docs.map(d=>{
+      const a = d.data();
+      return `<div class="appt-item"><span class="appt-time">${a.time}</span>${a.name} · ${a.siteName}${a.note?' · '+a.note:''}</div>`;
+    }).join('');
+  }catch(err){
+    list.innerHTML = `<div class="empty-note">불러오기 실패, 아래 링크를 눌러 색인을 만들어주세요:<br>${linkify(err.message)}</div>`;
+  }
+}
+
+async function submitAppointment(){
+  const name = document.getElementById('a-name').value.trim();
+  if(!name){ alert('환자 이름을 입력해주세요.'); return; }
+  const siteId = document.getElementById('a-site').value;
+  const site = sites.find(s=>s.id===siteId);
+  const date = document.getElementById('a-date').value;
+  const time = document.getElementById('a-time').value;
+  const note = document.getElementById('a-note').value;
+  try{
+    await db.collection('appointments').add({
+      name, siteId, siteName: site?site.name:'', date, time, note,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    alert('예약이 등록되었습니다.');
+    document.getElementById('cal-date').value = date;
+    loadAppointments();
+  }catch(err){
+    alert('예약 등록 실패: ' + err.message);
+  }
+}
+
+function toggleQuickAppt(){
+  const el = document.getElementById('quick-appt-form');
+  if(!el) return;
+  if(el.style.display === 'none'){
+    const dateEl = document.getElementById('qa-date');
+    if(dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0,10);
+    el.style.display = 'block';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+async function submitQuickAppt(){
+  const date = document.getElementById('qa-date').value;
+  const time = document.getElementById('qa-time').value;
+  const note = document.getElementById('qa-note').value;
+  if(!date){ alert('날짜를 선택해주세요.'); return; }
+  if(!activePatientData){ alert('환자 정보를 불러오지 못했습니다.'); return; }
+  try{
+    await db.collection('appointments').add({
+      name: activePatientData.name, patientId: activePatientId,
+      siteId: activePatientData.siteId, siteName: activePatientData.siteName,
+      date, time, note,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    alert('예약이 등록되었습니다. (예약 캘린더에서 확인 가능)');
+    document.getElementById('quick-appt-form').style.display = 'none';
+    document.getElementById('qa-note').value = '';
+  }catch(err){
+    alert('예약 등록 실패: ' + err.message);
+  }
+}
+
+/* =========================================================
+   11. 약국 워크플로우
+   ========================================================= */
+function renderPharmacy(){
+  const main = document.getElementById('main');
+  main.innerHTML = `<div class="topbar"><h2>약국</h2></div><div id="pharm-list" class="queue"><div class="empty-note">${t('loading')}</div></div>`;
+  unsubscribeQueue = db.collection('pharmacyQueue')
+    .where('status','in',['waiting','prepared'])
+    .orderBy('createdAt','asc')
+    .onSnapshot(snap=>{
+      const list = document.getElementById('pharm-list');
+      if(!list) return;
+      if(snap.empty){ list.innerHTML = '<div class="empty-note">대기 중인 처방이 없습니다.</div>'; return; }
+      list.innerHTML = snap.docs.map(d=>{
+        const p = d.data();
+        const statusLabel = p.status==='waiting' ? '조제대기' : '조제완료';
+        const nextLabel = p.status==='waiting' ? '조제완료 처리' : '투약/복약지도 완료';
+        return `<div class="queue-card" style="flex-wrap:wrap; cursor:pointer;" onclick="togglePharmRx('${d.id}')">
+          <div class="qc-info">
+            <div class="name">${p.patientName} <span class="pharm-status">${statusLabel}</span></div>
+            <div class="meta">${p.regNo} · ${p.siteName} · <span style="text-decoration:underline;">처방 보기</span></div>
+          </div>
+          <button class="btn small" onclick="event.stopPropagation(); advancePharmacy('${d.id}','${p.status}')">${nextLabel}</button>
+          <div id="pharm-rx-${d.id}" style="display:none; width:100%; font-size:12.5px; color:var(--ink-soft); margin-top:8px; padding-top:8px; border-top:1px solid var(--line); white-space:pre-wrap;">${p.prescription||'(처방 내용 없음)'}</div>
+        </div>`;
+      }).join('');
+    }, err=>{
+      const list = document.getElementById('pharm-list');
+      if(list) list.innerHTML = `<div class="empty-note">목록을 불러오지 못했습니다. 아래 링크를 눌러 색인을 만들어주세요:<br>${linkify(err.message)}</div>`;
+    });
+}
+
+function togglePharmRx(id){
+  const el = document.getElementById(`pharm-rx-${id}`);
+  if(el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+async function advancePharmacy(id, currentStatus){
+  const who = prompt('처리자 이름을 입력하세요 (약사명)');
+  if(!who) return;
+  const next = currentStatus === 'waiting' ? 'prepared' : 'dispensed';
+  const logField = next === 'prepared' ? 'preparedBy' : 'dispensedBy';
+  const timeField = next === 'prepared' ? 'preparedAt' : 'dispensedAt';
+  try{
+    await db.collection('pharmacyQueue').doc(id).update({
+      status: next,
+      [logField]: who,
+      [timeField]: firebase.firestore.FieldValue.serverTimestamp()
+    });
+  }catch(err){
+    alert('처리 실패: ' + err.message);
+  }
+}
+
+/* =========================================================
+   12. 통계 / 보고서
+   ========================================================= */
+let statsRangeType = 'month';
+let statsCustomStart = null;
+let statsCustomEnd = null;
+let statsVisitList = [];
+let statsSiteFilter = 'all';
+
+function toggleStatsVisitList(){
+  const card = document.getElementById('stats-visit-list-card');
+  const holder = document.getElementById('stats-visit-list');
+  if(!card) return;
+  if(card.style.display === 'none'){
+    if(statsVisitList.length === 0){
+      holder.innerHTML = '<div class="empty-note">이 기간에 진료받은 환자가 없습니다.</div>';
+    } else {
+      holder.innerHTML = statsVisitList.map(v => `
+        <div class="queue-card" onclick="closeStatsAndOpenChart('${v.patientId}')">
+          <div class="qc-info">
+            <div class="name">${v.name}</div>
+            <div class="meta">${v.siteName} · ${fmtDate(v.date)}</div>
+          </div>
+          <div class="qc-regno mono">${v.regNo}</div>
+        </div>
+      `).join('');
+    }
+    card.style.display = 'block';
+  } else {
+    card.style.display = 'none';
+  }
+}
+
+function closeStatsAndOpenChart(patientId){
+  openChart(patientId, null);
+}
+
+function statsScreenHTML(){
+  const today = new Date().toISOString().slice(0,10);
+  const siteOptions = `<option value="all" ${statsSiteFilter==='all'?'selected':''}>전체 사이트</option>`
+    + sites.map(s=>`<option value="${s.id}" ${s.id===statsSiteFilter?'selected':''}>${s.name}</option>`).join('');
+  return `
+    <div class="topbar"><h2>통계 / 보고서</h2></div>
+    <div class="card">
+      <div class="field" style="max-width:260px; margin-bottom:12px;">
+        <label>사이트</label>
+        <select id="stats-site-select" onchange="onStatsSiteChange()">${siteOptions}</select>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+        <button class="btn small ${statsRangeType==='day'?'':'outline'}" onclick="setStatsRange('day')">오늘</button>
+        <button class="btn small ${statsRangeType==='week'?'':'outline'}" onclick="setStatsRange('week')">이번 주</button>
+        <button class="btn small ${statsRangeType==='month'?'':'outline'}" onclick="setStatsRange('month')">이번 달</button>
+        <button class="btn small ${statsRangeType==='custom'?'':'outline'}" onclick="setStatsRange('custom')">기간 지정</button>
+      </div>
+      <div id="stats-custom-range" style="display:${statsRangeType==='custom'?'flex':'none'}; gap:10px; align-items:flex-end;">
+        <div class="field" style="margin-bottom:0;"><label>시작일</label><input type="date" id="stats-start" value="${statsCustomStart||today}"></div>
+        <div class="field" style="margin-bottom:0;"><label>종료일</label><input type="date" id="stats-end" value="${statsCustomEnd||today}"></div>
+        <button class="btn small" onclick="applyCustomStatsRange()">적용</button>
+      </div>
+    </div>
+    <div id="stats-body"><div class="empty-note">${t('loading')}</div></div>
+  `;
+}
+
+function onStatsSiteChange(){
+  statsSiteFilter = document.getElementById('stats-site-select').value;
+  loadStats();
+}
+
+function setStatsRange(type){
+  statsRangeType = type;
+  renderMain();
+  if(type!=='custom') loadStats();
+}
+
+function applyCustomStatsRange(){
+  statsCustomStart = document.getElementById('stats-start').value;
+  statsCustomEnd = document.getElementById('stats-end').value;
+  loadStats();
+}
+
+function getStatsRangeDates(){
+  const now = new Date();
+  let start, end;
+  if(statsRangeType==='day'){
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23,59,59);
+  } else if(statsRangeType==='week'){
+    const day = now.getDay();
+    start = new Date(now.getFullYear(), now.getMonth(), now.getDate()-day);
+    end = new Date(start.getFullYear(), start.getMonth(), start.getDate()+6, 23,59,59);
+  } else if(statsRangeType==='month'){
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    end = new Date(now.getFullYear(), now.getMonth()+1, 0, 23,59,59);
+  } else {
+    const s = statsCustomStart || now.toISOString().slice(0,10);
+    const e = statsCustomEnd || now.toISOString().slice(0,10);
+    start = new Date(s + 'T00:00:00');
+    end = new Date(e + 'T23:59:59');
+  }
+  return {start, end};
+}
+
+async function loadStats(){
+  const body = document.getElementById('stats-body');
+  if(!body) return;
+  body.innerHTML = `<div class="empty-note">${t('loading')}</div>`;
+  try{
+    const {start, end} = getStatsRangeDates();
+    const startTs = firebase.firestore.Timestamp.fromDate(start);
+    const endTs = firebase.firestore.Timestamp.fromDate(end);
+
+    // 전체 누적 통계 (기간과 무관, 사이트/연령/만성질환 현황 파악용) - 테스트용 환자는 제외
+    const patientsSnapAll = await db.collection('patients').get();
+    const siteFiltered = statsSiteFilter==='all' ? patientsSnapAll.docs : patientsSnapAll.docs.filter(d=>d.data().siteId===statsSiteFilter);
+    const patients = siteFiltered.filter(d=>!d.data().testPatient).map(d=>d.data());
+    const bySite = {};
+    const byAgeGroup = {'0-9':0,'10-19':0,'20-39':0,'40-59':0,'60+':0};
+    let htn=0, dm=0;
+    patients.forEach(p=>{
+      bySite[p.siteName] = (bySite[p.siteName]||0) + 1;
+      const age = parseAgeYears(p.age);
+      if(!isNaN(age)){
+        if(age<10) byAgeGroup['0-9']++;
+        else if(age<20) byAgeGroup['10-19']++;
+        else if(age<40) byAgeGroup['20-39']++;
+        else if(age<60) byAgeGroup['40-59']++;
+        else byAgeGroup['60+']++;
+      }
+      if(p.history?.hypertension) htn++;
+      if(p.history?.diabetes) dm++;
+    });
+
+    // 기간 내 신환 (등록일이 기간 안에 있는 환자, 단 일괄 가져오기로 등록된 환자·테스트용 환자는 항상 제외)
+    let newInRangeQuery = db.collection('patients')
+      .where('createdAt','>=',startTs).where('createdAt','<=',endTs);
+    if(statsSiteFilter!=='all') newInRangeQuery = newInRangeQuery.where('siteId','==',statsSiteFilter);
+    const newInRangeSnap = await newInRangeQuery.get();
+    const newInRange = newInRangeSnap.docs.filter(d => !d.data().imported && !d.data().testPatient).length;
+
+    // 기간 내 전체 방문(진료) 기록 - collectionGroup 조회
+    // 접수 시 자동 생성되는 "(초진 등록)" 스텁이나 빈 프로그레스 노트는 실제 진료로 세지 않음
+    const visitsSnapRaw = await db.collectionGroup('visits')
+      .where('date','>=',startTs).where('date','<=',endTs).get();
+
+    const patientMap = {};
+    patientsSnapAll.docs.forEach(d => { patientMap[d.id] = d.data(); });
+
+    const realVisitDocs = visitsSnapRaw.docs.filter(v=>{
+      const note = (v.data().progressNote || '').trim();
+      if(note === '' || note === '(초진 등록)') return false;
+      const patientId = v.ref.parent.parent.id;
+      const pat = patientMap[patientId];
+      if(!pat || pat.testPatient) return false;
+      if(statsSiteFilter!=='all' && pat.siteId !== statsSiteFilter) return false;
+      return true;
+    });
+    const totalVisitsInRange = realVisitDocs.length;
+    const returnVisitsInRange = Math.max(0, totalVisitsInRange - newInRange);
+
+    statsVisitList = realVisitDocs.map(v=>{
+      const patientId = v.ref.parent.parent.id;
+      const p = patientMap[patientId] || {};
+      return {
+        patientId, name: p.name||'(알 수 없음)', regNo: p.regNo||'-', siteName: p.siteName||'-',
+        date: v.data().date, progressNote: v.data().progressNote||''
+      };
+    }).sort((a,b)=>{
+      const ta = a.date?.toDate ? a.date.toDate().getTime() : 0;
+      const tb = b.date?.toDate ? b.date.toDate().getTime() : 0;
+      return tb - ta;
+    });
+
+    let rxCount = {};
+    realVisitDocs.forEach(v=>{
+      const rx = (v.data().prescription||'').trim();
+      if(rx) rx.split('\\n').forEach(line=>{
+        const l = line.trim();
+        if(l) rxCount[l] = (rxCount[l]||0) + 1;
+      });
+    });
+    const topRx = Object.entries(rxCount).sort((a,b)=>b[1]-a[1]).slice(0,5);
+
+    const siteRows = Object.entries(bySite).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+    const ageRows = Object.entries(byAgeGroup).map(([k,v])=>`<tr><td>${k}세</td><td>${v}</td></tr>`).join('');
+    const rxRows = topRx.map(([k,v])=>`<tr><td>${k.slice(0,25)}</td><td>${v}</td></tr>`).join('') || '<tr><td colspan="2">데이터 없음</td></tr>';
+
+    const rangeLabel = `${start.toISOString().slice(0,10)} ~ ${end.toISOString().slice(0,10)}`;
+    const siteLabel = statsSiteFilter==='all' ? '전체 사이트' : (sites.find(s=>s.id===statsSiteFilter)?.name || '전체 사이트');
+
+    body.innerHTML = `
+      <div class="note">선택 사이트: ${siteLabel} · 선택 기간: ${rangeLabel} (신환·진료건수는 이 기간 기준, 사이트/연령/만성질환 표는 전체 누적 기준)</div>
+      <div class="card" style="cursor:pointer; margin-bottom:16px;" onclick="toggleStatsVisitList()">
+        <h3>기간 내 진료 현황 (눌러서 명단 보기)</h3>
+        <div class="grid2" style="gap:10px;">
+          <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px;">
+            <div style="font-size:26px; font-weight:700; font-family:ui-monospace,monospace;">${totalVisitsInRange}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">전체 진료</div>
+          </div>
+          <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px;">
+            <div style="font-size:26px; font-weight:700; font-family:ui-monospace,monospace;">${newInRange}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">신환</div>
+          </div>
+          <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px;">
+            <div style="font-size:26px; font-weight:700; font-family:ui-monospace,monospace;">${returnVisitsInRange}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">재진</div>
+          </div>
+        </div>
+      </div>
+      <div class="grid2" style="margin-bottom:16px;">
+        <div class="card"><h3>${siteLabel} 누적 등록</h3>
+          <div style="font-size:30px; font-weight:700; font-family:ui-monospace,monospace;">${patients.length}<span style="font-size:13px; color:var(--ink-soft);"> 명</span></div>
+          <div style="font-size:12px; color:var(--ink-soft); margin-top:6px;">고혈압 ${htn}명 · 당뇨 ${dm}명</div>
+        </div>
+        <div class="card"><h3>사이트별 등록 수${statsSiteFilter==='all'?' (전체)':''}</h3><table class="chronic-table"><tr><th>사이트</th><th>명</th></tr>${siteRows}</table></div>
+      </div>
+      <div class="card" id="stats-visit-list-card" style="display:none;">
+        <h3>기간 내 진료 명단</h3>
+        <div id="stats-visit-list"></div>
+      </div>
+      <div class="card" style="margin-bottom:16px;">
+        <h3>연령별 통계 (${siteLabel})</h3>
+        <table class="chronic-table"><tr><th>연령대</th><th>명</th></tr>${ageRows}</table>
+      </div>
+      <div class="card"><h3>다빈도 처방 (기간 내, 상위 5)</h3><table class="chronic-table"><tr><th>처방 내용</th><th>건수</th></tr>${rxRows}</table></div>
+    `;
+  }catch(err){
+    body.innerHTML = `<div class="empty-note">통계를 불러오지 못했습니다. Firestore 색인이 필요할 수 있습니다.<br>${linkify(err.message)}</div>`;
+  }
+}
+
+/* =========================================================
+   13. Gemini 의학 Q&A / 번역 위젯
+   ========================================================= */
+function toggleGemini(){
+  document.getElementById('gemini-panel').classList.toggle('open');
+}
+
+async function sendGemini(){
+  const input = document.getElementById('gemini-input');
+  const question = input.value.trim();
+  if(!question) return;
+  const body = document.getElementById('gemini-body');
+  body.innerHTML += `<div class="gemini-bubble me">${question}</div>`;
+  input.value = '';
+  body.scrollTop = body.scrollHeight;
+
+  if(!GEMINI_API_KEY || GEMINI_API_KEY.indexOf('여기에') === 0){
+    body.innerHTML += `<div class="gemini-bubble">Gemini API 키가 아직 설정되지 않았습니다. aistudio.google.com 에서 무료 키를 발급받아 코드 상단에 넣어주세요.</div>`;
+    body.scrollTop = body.scrollHeight;
+    return;
+  }
+
+  body.innerHTML += `<div class="gemini-bubble" id="gemini-loading">...</div>`;
+  body.scrollTop = body.scrollHeight;
+
+  try{
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        contents:[{ parts:[{ text: question }] }]
+      })
+    });
+    const data = await resp.json();
+    if(data.error){
+      document.getElementById('gemini-loading').outerHTML = `<div class="gemini-bubble">오류: ${data.error.message || JSON.stringify(data.error)}</div>`;
+    } else {
+      const answer = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if(answer){
+        document.getElementById('gemini-loading').outerHTML = `<div class="gemini-bubble">${answer.replace(/\n/g,'<br>')}</div>`;
+      } else {
+        document.getElementById('gemini-loading').outerHTML = `<div class="gemini-bubble">예상치 못한 응답입니다.<br><span style="font-size:10px;">${JSON.stringify(data).slice(0,500)}</span></div>`;
+      }
+    }
+  }catch(err){
+    const el = document.getElementById('gemini-loading');
+    if(el) el.outerHTML = `<div class="gemini-bubble">오류가 발생했습니다: ${err.message}</div>`;
+  }
+  body.scrollTop = body.scrollHeight;
+}
+</script>
+</body>
+</html>
