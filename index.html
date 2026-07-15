@@ -548,6 +548,7 @@ function renderNav(){
   if(currentUser.role === 'doctor'){
     nav.innerHTML = `
       <div class="nav-item ${screenName==='queue'?'active':''}" onclick="setScreen('queue')">🕒 ${t('navQueue')}</div>
+      <div class="nav-item ${screenName==='doneList'?'active':''}" onclick="setScreen('doneList')">✅ 진료완료 리스트</div>
       <div class="nav-item ${screenName==='reg'?'active':''}" onclick="setScreen('reg')">➕ ${t('navReg')}</div>
       <div class="nav-item ${screenName==='search'?'active':''}" onclick="setScreen('search')">🔍 ${t('navSearch')}</div>
       <div class="nav-item ${screenName==='calendar'?'active':''}" onclick="setScreen('calendar')">📅 ${t('navCalendar')}</div>
@@ -564,6 +565,7 @@ function renderNav(){
       <div class="nav-item ${screenName==='reg'?'active':''}" onclick="setScreen('reg')">➕ ${t('navReg')}</div>
       <div class="nav-item ${screenName==='search'?'active':''}" onclick="setScreen('search')">🔍 ${t('navSearchReception')}</div>
       <div class="nav-item ${screenName==='queue'?'active':''}" onclick="setScreen('queue')">🕒 ${t('navQueue')}</div>
+      <div class="nav-item ${screenName==='doneList'?'active':''}" onclick="setScreen('doneList')">✅ 진료완료 리스트</div>
       <div class="nav-item ${screenName==='calendar'?'active':''}" onclick="setScreen('calendar')">📅 ${t('navCalendar')}</div>
     `;
   }
@@ -574,6 +576,7 @@ function renderMain(){
   if(unsubscribeQueue){ unsubscribeQueue(); unsubscribeQueue=null; }
 
   if(screenName==='queue') renderQueue();
+  else if(screenName==='doneList') renderDoneList();
   else if(screenName==='reg'){ main.innerHTML = regScreenHTML(); updateRegNoPreview(); }
   else if(screenName==='chart') main.innerHTML = `<div class="empty-note">${t('loading')}</div>`;
   else if(screenName==='search') main.innerHTML = searchScreenHTML();
@@ -602,8 +605,6 @@ function renderQueue(){
   main.innerHTML = `
     <div class="topbar"><h2>${t('queueTitle')}</h2></div>
     <div id="queue-list" class="queue"><div class="empty-note">${t('loading')}</div></div>
-    <h3 style="margin:22px 0 8px;">오늘 진료완료 리스트</h3>
-    <div id="queue-done-list" class="queue"><div class="empty-note">${t('loading')}</div></div>
   `;
   unsubscribeQueue = db.collection('waitingList')
     .where('status','in',['waiting','inProgress'])
@@ -630,31 +631,57 @@ function renderQueue(){
       document.getElementById('queue-list').innerHTML =
         `<div class="empty-note">목록을 불러오지 못했습니다. Firestore 색인(index) 생성이 필요할 수 있습니다. 아래 링크를 눌러 색인을 만들어주세요.<br>${linkify(err.message)}</div>`;
     });
+}
 
+/* =========================================================
+   5-1. 진료완료 리스트 (독립 메뉴) - "오늘 실제 진료 기록이 남은" 환자 기준
+   ========================================================= */
+async function renderDoneList(){
+  const main = document.getElementById('main');
+  main.innerHTML = `<div class="topbar"><h2>진료완료 리스트</h2></div><div id="donelist-body" class="queue"><div class="empty-note">${t('loading')}</div></div>`;
   const {startTs, endTs} = getTodayRange();
-  db.collection('waitingList')
-    .where('status','==','done')
-    .where('checkinAt','>=',startTs).where('checkinAt','<=',endTs)
-    .orderBy('checkinAt','desc')
-    .get().then(snap=>{
-      const list = document.getElementById('queue-done-list');
-      if(!list) return;
-      if(snap.empty){ list.innerHTML = '<div class="empty-note">오늘 진료완료된 환자가 없습니다.</div>'; return; }
-      list.innerHTML = snap.docs.map(d=>{
-        const w = d.data();
-        return `
-          <div class="queue-card" onclick="openChart('${w.patientId}', null)">
-            <div class="qc-info">
-              <div class="name">${w.name}</div>
-              <div class="meta">${w.gender||''} · ${ageLabel(w.age)} · ${w.siteName}</div>
-            </div>
-            <div class="qc-regno mono">${w.regNo}</div>
-          </div>`;
-      }).join('');
-    }).catch(err=>{
-      const list = document.getElementById('queue-done-list');
-      if(list) list.innerHTML = `<div class="empty-note">목록을 불러오지 못했습니다. 아래 링크를 눌러 색인을 만들어주세요:<br>${linkify(err.message)}</div>`;
+  try{
+    const visitsSnap = await db.collectionGroup('visits')
+      .where('date','>=',startTs).where('date','<=',endTs).get();
+    const realDocs = visitsSnap.docs.filter(v=>{
+      const note = (v.data().progressNote||'').trim();
+      return note && note !== '(초진 등록)';
     });
+    const uniquePatientIds = [...new Set(realDocs.map(v=>v.ref.parent.parent.id))];
+    const patientDocs = await Promise.all(uniquePatientIds.map(pid=>db.collection('patients').doc(pid).get()));
+    const patientMap = {};
+    patientDocs.forEach(d=>{ if(d.exists) patientMap[d.id] = d.data(); });
+
+    // 환자별로 오늘의 가장 최근 방문만 대표로 표시
+    const latestByPatient = {};
+    realDocs.forEach(v=>{
+      const pid = v.ref.parent.parent.id;
+      const ms = v.data().date && v.data().date.toMillis ? v.data().date.toMillis() : 0;
+      if(!latestByPatient[pid] || ms > latestByPatient[pid].ms){
+        latestByPatient[pid] = {ms};
+      }
+    });
+    const list = Object.entries(latestByPatient).map(([pid, {ms}])=>{
+      const p = patientMap[pid] || {};
+      return {patientId: pid, name: p.name||'(알 수 없음)', regNo: p.regNo||'-', gender:p.gender, age:p.age, siteName: p.siteName||'-', ms};
+    }).sort((a,b)=> b.ms - a.ms);
+
+    const body = document.getElementById('donelist-body');
+    if(!body) return;
+    if(list.length === 0){ body.innerHTML = '<div class="empty-note">오늘 진료완료된 환자가 없습니다.</div>'; return; }
+    body.innerHTML = list.map(v=>`
+      <div class="queue-card" onclick="openChart('${v.patientId}', null)">
+        <div class="qc-info">
+          <div class="name">${v.name}</div>
+          <div class="meta">${v.gender||''} · ${ageLabel(v.age)} · ${v.siteName}</div>
+        </div>
+        <div class="qc-regno mono">${v.regNo}</div>
+      </div>
+    `).join('');
+  }catch(err){
+    const body = document.getElementById('donelist-body');
+    if(body) body.innerHTML = `<div class="empty-note">목록을 불러오지 못했습니다. 아래 링크를 눌러 색인을 만들어주세요:<br>${linkify(err.message)}</div>`;
+  }
 }
 
 async function removeFromQueue(waitingId){
@@ -1813,10 +1840,11 @@ function setPharmTab(tab){
 
 function pharmTabBarHTML(){
   const tabs = [
-    {id:'all', label:'오늘 등록 환자'},
+    {id:'all', label:'오늘 접수 환자'},
     {id:'waiting', label:'조제 대기'},
     {id:'prepared', label:'투약 대기'},
-    {id:'dispensed', label:'투약·복약지도 완료'}
+    {id:'dispensed', label:'약국 투약·복약지도 완료'},
+    {id:'direct', label:'진료실 투약 완료'}
   ];
   return `<div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
     ${tabs.map(tb=>`<button class="btn small ${pharmTab===tb.id?'':'outline'}" onclick="setPharmTab('${tb.id}')">${tb.label}</button>`).join('')}
@@ -1830,21 +1858,61 @@ function renderPharmacy(){
 
   if(pharmTab === 'all'){
     const {startTs, endTs} = getTodayRange();
-    db.collection('patients')
-      .where('createdAt','>=',startTs).where('createdAt','<=',endTs)
-      .orderBy('createdAt','desc')
+    db.collection('waitingList')
+      .where('checkinAt','>=',startTs).where('checkinAt','<=',endTs)
+      .orderBy('checkinAt','desc')
       .get().then(snap=>{
         const list = document.getElementById('pharm-list');
         if(!list) return;
-        if(snap.empty){ list.innerHTML = '<div class="empty-note">오늘 등록된 환자가 없습니다.</div>'; return; }
+        if(snap.empty){ list.innerHTML = '<div class="empty-note">오늘 접수한 환자가 없습니다.</div>'; return; }
         list.innerHTML = snap.docs.map(d=>{
-          const p = d.data();
-          return `<div class="queue-card" onclick="openChart('${d.id}', null)">
+          const w = d.data();
+          return `<div class="queue-card" onclick="openChart('${w.patientId}', null)">
             <div class="qc-info">
-              <div class="name">${p.name}</div>
-              <div class="meta">${p.gender||''} · ${ageLabel(p.age)} · ${p.siteName}</div>
+              <div class="name">${w.name}</div>
+              <div class="meta">${w.gender||''} · ${ageLabel(w.age)} · ${w.siteName}</div>
             </div>
-            <div class="qc-regno mono">${p.regNo}</div>
+            <div class="qc-regno mono">${w.regNo}</div>
+          </div>`;
+        }).join('');
+      }).catch(err=>{
+        const list = document.getElementById('pharm-list');
+        if(list) list.innerHTML = `<div class="empty-note">목록을 불러오지 못했습니다. 아래 링크를 눌러 색인을 만들어주세요:<br>${linkify(err.message)}</div>`;
+      });
+    return;
+  }
+
+  if(pharmTab === 'direct'){
+    const {startTs, endTs} = getTodayRange();
+    db.collectionGroup('visits')
+      .where('date','>=',startTs).where('date','<=',endTs)
+      .get().then(async snap=>{
+        const list = document.getElementById('pharm-list');
+        if(!list) return;
+        const directDocs = snap.docs.filter(v=>{
+          const d = v.data();
+          const note = (d.progressNote||'').trim();
+          return d.dispenseMode === 'direct' && note && note !== '(초진 등록)' && (d.prescription||'').trim();
+        });
+        if(directDocs.length === 0){ list.innerHTML = '<div class="empty-note">오늘 진료실에서 바로 투약 완료된 처방이 없습니다.</div>'; return; }
+        const uniquePatientIds = [...new Set(directDocs.map(v=>v.ref.parent.parent.id))];
+        const patientDocs = await Promise.all(uniquePatientIds.map(pid=>db.collection('patients').doc(pid).get()));
+        const patientMap = {};
+        patientDocs.forEach(d=>{ if(d.exists) patientMap[d.id] = d.data(); });
+        const sorted = directDocs.slice().sort((a,b)=>{
+          const ta = a.data().date && a.data().date.toMillis ? a.data().date.toMillis() : 0;
+          const tb = b.data().date && b.data().date.toMillis ? b.data().date.toMillis() : 0;
+          return tb - ta;
+        });
+        list.innerHTML = sorted.map(v=>{
+          const pid = v.ref.parent.parent.id;
+          const p = patientMap[pid] || {};
+          return `<div class="queue-card" style="flex-wrap:wrap; cursor:pointer;" onclick="togglePharmRx('direct-${v.id}')">
+            <div class="qc-info">
+              <div class="name">${p.name||'(알 수 없음)'} <span class="pharm-status">진료실 투약 완료</span></div>
+              <div class="meta">${p.regNo||'-'} · ${p.siteName||'-'} · <span style="text-decoration:underline;">처방 보기</span></div>
+            </div>
+            <div id="pharm-rx-direct-${v.id}" style="display:none; width:100%; font-size:12.5px; color:var(--ink-soft); margin-top:8px; padding-top:8px; border-top:1px solid var(--line); white-space:pre-wrap;">${v.data().prescription||'(처방 내용 없음)'}</div>
           </div>`;
         }).join('');
       }).catch(err=>{
