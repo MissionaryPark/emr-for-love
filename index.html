@@ -185,9 +185,27 @@
         <div class="rp active" data-role="doctor" onclick="pickRole('doctor')" id="rp-doctor">진료실</div>
         <div class="rp" data-role="reception" onclick="pickRole('reception')" id="rp-reception">접수</div>
         <div class="rp" data-role="pharmacy" onclick="pickRole('pharmacy')" id="rp-pharmacy">약국</div>
+        <div class="rp" data-role="lab" onclick="pickRole('lab')" id="rp-lab">검사실</div>
       </div>
       <div class="field"><label id="lbl-name">이름</label><input id="login-name" placeholder="예: 김민준"></div>
-      <div class="field" id="dept-field"><label id="lbl-dept">진료과 (진료실인 경우)</label><input id="login-dept" placeholder="예: 가정의학과"></div>
+      <div class="field" id="dept-field">
+        <label id="lbl-dept">진료과</label>
+        <select id="login-dept" onchange="onLoginDeptChange()">
+          <option value="">선택하세요</option>
+          <option value="내과">내과</option>
+          <option value="소아과">소아과</option>
+          <option value="산부인과">산부인과</option>
+          <option value="피부과">피부과</option>
+          <option value="치과">치과</option>
+          <option value="정형외과">정형외과</option>
+          <option value="안과">안과</option>
+          <option value="이비인후과">이비인후과</option>
+          <option value="정신과">정신과</option>
+          <option value="__custom__">기타 (직접 입력)</option>
+          <option value="admin">관리자 (admin, 모든 화면 조작 가능)</option>
+        </select>
+        <input id="login-dept-custom" placeholder="진료과명을 입력하세요" style="display:none; margin-top:8px;">
+      </div>
       <button class="btn" id="btn-start" onclick="doLogin()">시작하기</button>
       <div id="login-error">이름을 입력해주세요.</div>
     </div>
@@ -343,15 +361,35 @@ function pickRole(r){
   document.getElementById('dept-field').style.display = r==='doctor' ? 'block' : 'none';
 }
 
+function onLoginDeptChange(){
+  const sel = document.getElementById('login-dept');
+  const custom = document.getElementById('login-dept-custom');
+  if(!sel || !custom) return;
+  custom.style.display = sel.value === '__custom__' ? 'block' : 'none';
+}
+
 let currentUser = null; // {role, name, dept, lang}
 
 function doLogin(){
   const name = document.getElementById('login-name').value.trim();
   if(!name){ document.getElementById('login-error').style.display='block'; return; }
-  const dept = document.getElementById('login-dept').value.trim();
+  const deptSel = document.getElementById('login-dept').value;
+  const dept = deptSel === '__custom__' ? document.getElementById('login-dept-custom').value.trim() : deptSel;
   currentUser = { role: pendingRole, name, dept: pendingRole==='doctor' ? (dept||'미지정') : '', lang: currentLang };
   sessionStorage.setItem('emr_user', JSON.stringify(currentUser));
   enterApp();
+}
+
+// "admin" 진료과로 로그인한 의사는 프로그램 전체(접수/약국/검사실/통계 등)를 조작할 수 있다.
+function isAdminUser(){
+  return !!(currentUser && currentUser.role==='doctor' && (currentUser.dept||'').trim().toLowerCase()==='admin');
+}
+// area: 'pharmacy' | 'lab' — 해당 화면에서 실제로 조작(입력/완료처리)이 가능한지
+function canEditArea(area){
+  if(isAdminUser()) return true;
+  if(area==='pharmacy') return currentUser && currentUser.role==='pharmacy';
+  if(area==='lab') return currentUser && currentUser.role==='lab';
+  return false;
 }
 
 function logout(){
@@ -362,13 +400,15 @@ function logout(){
 function enterApp(){
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app-shell').style.display = 'block';
-  const roleLabel = currentUser.role==='doctor' ? `${currentUser.dept} · ${currentUser.name} 선생님`
+  const roleLabel = isAdminUser() ? `관리자 · ${currentUser.name}`
+    : currentUser.role==='doctor' ? `${currentUser.dept} · ${currentUser.name} 선생님`
     : currentUser.role==='pharmacy' ? `약국 · ${currentUser.name}`
+    : currentUser.role==='lab' ? `검사실 · ${currentUser.name}`
     : `접수 · ${currentUser.name}`;
   document.getElementById('whoami-label').textContent = roleLabel;
   initSites();
   renderNav();
-  const initialScreen = currentUser.role==='doctor' ? 'queue' : currentUser.role==='pharmacy' ? 'pharmacy' : 'reg';
+  const initialScreen = currentUser.role==='doctor' ? 'queue' : currentUser.role==='pharmacy' ? 'pharmacy' : currentUser.role==='lab' ? 'lab' : 'reg';
   history.replaceState({type:'screen', screen: initialScreen}, '', '#'+initialScreen);
   suppressHistoryPush = true;
   setScreen(initialScreen);
@@ -545,7 +585,8 @@ function setScreen(s){
 
 function renderNav(){
   const nav = document.getElementById('nav-list');
-  if(currentUser.role === 'doctor'){
+  if(isAdminUser()){
+    // 관리자(admin)는 프로그램의 모든 화면을 볼 수 있고 조작도 가능하다.
     nav.innerHTML = `
       <div class="nav-item ${screenName==='queue'?'active':''}" onclick="setScreen('queue')">🕒 ${t('navQueue')}</div>
       <div class="nav-item ${screenName==='doneList'?'active':''}" onclick="setScreen('doneList')">✅ 진료완료 리스트</div>
@@ -553,6 +594,20 @@ function renderNav(){
       <div class="nav-item ${screenName==='search'?'active':''}" onclick="setScreen('search')">🔍 ${t('navSearch')}</div>
       <div class="nav-item ${screenName==='lab'?'active':''}" onclick="setScreen('lab')">🧪 검사실</div>
       <div class="nav-item ${screenName==='pharmacy'?'active':''}" onclick="setScreen('pharmacy')">💊 ${t('navPharmacy')}</div>
+      <div class="nav-item ${screenName==='messages'?'active':''}" onclick="setScreen('messages')">💬 메세지</div>
+      <div class="nav-item ${screenName==='calendar'?'active':''}" onclick="setScreen('calendar')">📅 ${t('navCalendar')}</div>
+      <div class="nav-item ${screenName==='stats'?'active':''}" onclick="setScreen('stats')">📊 ${t('navStats')}</div>
+      <div class="nav-item ${screenName==='backup'?'active':''}" onclick="setScreen('backup')">💾 데이터 백업</div>
+    `;
+  } else if(currentUser.role === 'doctor'){
+    nav.innerHTML = `
+      <div class="nav-item ${screenName==='queue'?'active':''}" onclick="setScreen('queue')">🕒 ${t('navQueue')}</div>
+      <div class="nav-item ${screenName==='doneList'?'active':''}" onclick="setScreen('doneList')">✅ 진료완료 리스트</div>
+      <div class="nav-item ${screenName==='reg'?'active':''}" onclick="setScreen('reg')">➕ ${t('navReg')}</div>
+      <div class="nav-item ${screenName==='search'?'active':''}" onclick="setScreen('search')">🔍 ${t('navSearch')}</div>
+      <div class="nav-item ${screenName==='lab'?'active':''}" onclick="setScreen('lab')">🧪 검사실 (보기 전용)</div>
+      <div class="nav-item ${screenName==='pharmacy'?'active':''}" onclick="setScreen('pharmacy')">💊 ${t('navPharmacy')} (보기 전용)</div>
+      <div class="nav-item ${screenName==='messages'?'active':''}" onclick="setScreen('messages')">💬 메세지</div>
       <div class="nav-item ${screenName==='calendar'?'active':''}" onclick="setScreen('calendar')">📅 ${t('navCalendar')}</div>
       <div class="nav-item ${screenName==='stats'?'active':''}" onclick="setScreen('stats')">📊 ${t('navStats')}</div>
       <div class="nav-item ${screenName==='backup'?'active':''}" onclick="setScreen('backup')">💾 데이터 백업</div>
@@ -560,6 +615,12 @@ function renderNav(){
   } else if(currentUser.role === 'pharmacy'){
     nav.innerHTML = `
       <div class="nav-item ${screenName==='pharmacy'?'active':''}" onclick="setScreen('pharmacy')">💊 ${t('navPharmacy')}</div>
+      <div class="nav-item ${screenName==='messages'?'active':''}" onclick="setScreen('messages')">💬 메세지</div>
+    `;
+  } else if(currentUser.role === 'lab'){
+    nav.innerHTML = `
+      <div class="nav-item ${screenName==='lab'?'active':''}" onclick="setScreen('lab')">🧪 검사실</div>
+      <div class="nav-item ${screenName==='messages'?'active':''}" onclick="setScreen('messages')">💬 메세지</div>
     `;
   } else {
     nav.innerHTML = `
@@ -567,6 +628,7 @@ function renderNav(){
       <div class="nav-item ${screenName==='search'?'active':''}" onclick="setScreen('search')">🔍 ${t('navSearchReception')}</div>
       <div class="nav-item ${screenName==='queue'?'active':''}" onclick="setScreen('queue')">🕒 ${t('navQueue')}</div>
       <div class="nav-item ${screenName==='doneList'?'active':''}" onclick="setScreen('doneList')">✅ 진료완료 리스트</div>
+      <div class="nav-item ${screenName==='messages'?'active':''}" onclick="setScreen('messages')">💬 메세지</div>
       <div class="nav-item ${screenName==='calendar'?'active':''}" onclick="setScreen('calendar')">📅 ${t('navCalendar')}</div>
     `;
   }
@@ -585,8 +647,86 @@ function renderMain(){
   else if(screenName==='calendar'){ main.innerHTML = calendarScreenHTML(); loadAppointments(); }
   else if(screenName==='pharmacy') renderPharmacy();
   else if(screenName==='lab') renderLab();
+  else if(screenName==='messages') renderMessages();
   else if(screenName==='stats'){ main.innerHTML = statsScreenHTML(); loadStats(); }
   else if(screenName==='backup') main.innerHTML = backupScreenHTML();
+}
+
+/* =========================================================
+   메세지 (진료과/약국/검사실 간 간단한 메세지 송수신)
+   ========================================================= */
+function getMessageChannels(){ return DEPT_OPTIONS.concat(['약국','검사실']); }
+function myMessageChannel(){
+  if(isAdminUser()) return null; // 관리자는 특정 채널에 속하지 않고 전체를 봄
+  if(currentUser.role==='pharmacy') return '약국';
+  if(currentUser.role==='lab') return '검사실';
+  if(currentUser.role==='doctor') return currentUser.dept;
+  return null;
+}
+function renderMessages(){
+  if(unsubscribeQueue){ unsubscribeQueue(); unsubscribeQueue=null; }
+  const main = document.getElementById('main');
+  const myChannel = myMessageChannel();
+  const channelOptions = getMessageChannels().map(c=>`<option value="${c}">${c}</option>`).join('');
+  main.innerHTML = `
+    <div class="topbar"><h2>메세지</h2></div>
+    <div class="card">
+      <h3>보내기</h3>
+      <div class="grid2">
+        <div class="field"><label>받는 곳</label><select id="msg-to">${channelOptions}</select></div>
+        <div class="field"><label>보내는 사람</label><input value="${myChannel?myChannel+' · ':''}${currentUser.name}" disabled></div>
+      </div>
+      <div class="field"><label>내용</label><textarea id="msg-text" rows="3"></textarea></div>
+      <button class="btn small" onclick="sendMessage()">보내기</button>
+    </div>
+    <div class="card">
+      <h3>${myChannel ? `받은/보낸 메세지 (내 채널: ${myChannel})` : '전체 메세지 (관리자)'}</h3>
+      <div id="messages-list"><div class="empty-note">${t('loading')}</div></div>
+    </div>
+  `;
+  unsubscribeQueue = db.collection('messages').orderBy('createdAt','desc').limit(100)
+    .onSnapshot(snap=>{
+      const list = document.getElementById('messages-list');
+      if(!list) return;
+      let docs = snap.docs;
+      if(myChannel){
+        docs = docs.filter(d=>{
+          const m = d.data();
+          return m.toChannel === myChannel || m.fromChannel === myChannel;
+        });
+      }
+      if(docs.length===0){ list.innerHTML = '<div class="empty-note">메세지가 없습니다.</div>'; return; }
+      list.innerHTML = docs.map(d=>{
+        const m = d.data();
+        return `<div class="queue-card" style="flex-wrap:wrap; cursor:default;">
+          <div class="qc-info">
+            <div class="name">${m.fromChannel||''} ${m.fromName?('· '+m.fromName):''} → ${m.toChannel}</div>
+            <div class="meta">${fmtDate(m.createdAt)}</div>
+            <div style="margin-top:6px; white-space:pre-wrap;">${m.text}</div>
+          </div>
+        </div>`;
+      }).join('');
+    }, err=>{
+      const list = document.getElementById('messages-list');
+      if(list) list.innerHTML = `<div class="empty-note">목록을 불러오지 못했습니다. 아래 링크를 눌러 색인을 만들어주세요:<br>${linkify(err.message)}</div>`;
+    });
+}
+async function sendMessage(){
+  const toChannel = document.getElementById('msg-to').value;
+  const text = document.getElementById('msg-text').value.trim();
+  if(!text){ alert('내용을 입력해주세요.'); return; }
+  try{
+    await db.collection('messages').add({
+      toChannel,
+      fromChannel: myMessageChannel() || '관리자',
+      fromName: currentUser.name,
+      text,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    document.getElementById('msg-text').value = '';
+  }catch(err){
+    alert('메세지 전송 실패: ' + err.message);
+  }
 }
 
 /* =========================================================
@@ -615,34 +755,58 @@ function deptButtonClickable(dep){
   return dep.status !== 'done' && dep.status !== 'examPending';
 }
 
+let queueDeptFilter = 'all';
+function onQueueDeptFilterChange(v){
+  queueDeptFilter = v;
+  renderQueue();
+}
 function renderQueue(){
   const main = document.getElementById('main');
+  const deptFilterOptions = ['<option value="all">전체 진료과</option>']
+    .concat(DEPT_OPTIONS.map(d=>`<option value="${d}" ${queueDeptFilter===d?'selected':''}>${d}</option>`))
+    .concat(['<option value="일반진료" '+(queueDeptFilter==='일반진료'?'selected':'')+'>일반진료</option>']);
   main.innerHTML = `
     <div class="topbar"><h2>${t('queueTitle')}</h2></div>
+    <div class="field" style="max-width:220px; margin-bottom:12px;">
+      <select id="queue-dept-filter" onchange="onQueueDeptFilterChange(this.value)">${deptFilterOptions.join('')}</select>
+    </div>
     <div id="queue-list" class="queue"><div class="empty-note">${t('loading')}</div></div>
   `;
+  const filterSel = document.getElementById('queue-dept-filter');
+  if(filterSel) filterSel.value = queueDeptFilter;
   unsubscribeQueue = db.collection('waitingList')
     .where('status','in',['waiting','inProgress'])
     .orderBy('checkinAt','asc')
     .onSnapshot(snap=>{
       const list = document.getElementById('queue-list');
       if(!list) return;
-      if(snap.empty){ list.innerHTML = `<div class="empty-note">${t('emptyQueue')}</div>`; return; }
-      list.innerHTML = snap.docs.map(d=>{
+      let docs = snap.docs;
+      if(queueDeptFilter !== 'all'){
+        docs = docs.filter(d=>{
+          const w = d.data();
+          const depts = (w.departments && w.departments.length) ? w.departments : [{name:'일반진료'}];
+          return depts.some(dep=>dep.name===queueDeptFilter);
+        });
+      }
+      if(docs.length===0){ list.innerHTML = `<div class="empty-note">${t('emptyQueue')}</div>`; return; }
+      // 의사는 원칙적으로 자기 과 버튼만 누를 수 있다 (admin은 예외로 전부 가능)
+      const restrictToOwnDept = currentUser.role === 'doctor' && !isAdminUser();
+      list.innerHTML = docs.map(d=>{
         const w = d.data();
         const chronicBadges = (w.chronicTags||[]).map(tag=>`<span class="badge-chronic">${tag}</span>`).join('');
         const depts = (w.departments && w.departments.length) ? w.departments : [{name:'일반진료', status:'waiting'}];
         const deptButtons = depts.map((dep, idx)=>{
           const label = deptButtonLabel(dep);
-          if(deptButtonClickable(dep)){
+          const isOwnDept = !restrictToOwnDept || dep.name === currentUser.dept;
+          if(deptButtonClickable(dep) && isOwnDept){
             return `<button class="btn small ${dep.status==='waiting'?'outline':''}" onclick="event.stopPropagation(); openChart('${w.patientId}','${d.id}',${idx})">${label}</button>`;
           }
-          return `<span class="pharm-status" style="padding:6px 10px;">${label}</span>`;
+          return `<span class="pharm-status" style="padding:6px 10px;">${label}${(!isOwnDept && deptButtonClickable(dep))?' (다른 과)':''}</span>`;
         }).join(' ');
         return `
           <div class="queue-card" style="flex-wrap:wrap; cursor:default;">
             <div class="qc-info">
-              <div class="name">${w.name}${chronicBadges}</div>
+              <div class="name">${w.name}${chronicBadges}${testBadgeHTML(w.testPatient)}</div>
               <div class="meta">${w.gender||''} · ${ageLabel(w.age)} · ${w.siteName}</div>
             </div>
             <div class="qc-regno mono">${w.regNo}</div>
@@ -958,7 +1122,7 @@ async function submitRegistration(){
     const departments = makeDepartments(getPickedDepts('reg'));
     await db.collection('waitingList').add({
       patientId: patientRef.id, siteId, siteName: site.name, regNo, name, gender, age,
-      chronicTags, status:'waiting', departments, sessionRx: [],
+      chronicTags, status:'waiting', departments, sessionRx: [], testPatient: isTestPatient,
       checkinAt: firebase.firestore.FieldValue.serverTimestamp()
     });
 
@@ -1026,7 +1190,7 @@ async function doSearch(){
     return `
       <div class="queue-card" style="flex-wrap:wrap;">
         <div class="qc-info">
-          <div class="name">${p.name}</div>
+          <div class="name">${p.name}${testBadgeHTML(p.testPatient)}</div>
           <div class="meta">${p.gender||''} · ${ageLabel(p.age)} · ${p.siteName}</div>
         </div>
         <div class="qc-regno mono">${p.regNo}</div>
@@ -1059,7 +1223,7 @@ async function checkInExisting(patientId){
   const departments = makeDepartments(getPickedDepts('checkin-'+patientId));
   await db.collection('waitingList').add({
     patientId, siteId:p.siteId, siteName:p.siteName, regNo:p.regNo, name:p.name, gender:p.gender, age:p.age,
-    chronicTags, status:'waiting', departments, sessionRx: [],
+    chronicTags, status:'waiting', departments, sessionRx: [], testPatient: !!p.testPatient,
     checkinAt: firebase.firestore.FieldValue.serverTimestamp()
   });
   resetDeptPicker('checkin-'+patientId);
@@ -1077,8 +1241,84 @@ let activeDeptIndex = null;
 let activeDeptName = null;
 let activeSessionRx = [];
 let activeExamOrder = null; // 현재 진료과의 진행중/완료된 검사 주문 {id, items, status} 또는 null
+let activeDraftDiagnoses = []; // 지금 작성 중인 진단명 목록 [{code, ko, en}]
+let activeCarriedRxRowThreshold = 0; // 이 값 미만 idx의 처방 행은 "다른 과가 이미 넣어둔 것"으로 간주 (내 처방 집계에서 제외)
 let presets = [];
 let examPresetItems = [];
+let customDiagnoses = []; // Firestore에 저장된, 사용자가 직접 추가한 진단명 (내장 목록에 없던 것들)
+
+// 자주 쓰는 진단명 시드 목록 (한글/영문/ICD-11 코드).
+// 주의: WHO ICD-11 API를 직접 연동하지 않고 미리 정리해 둔 목록이라, 정확한 코드가 필요한 경우
+// https://icd.who.int/browse11 에서 한번 더 확인하는 것을 권장합니다. 목록에 없는 진단명은
+// "+ 목록에 없는 진단명 직접 추가"로 넣으면 이후 검색에도 계속 나오도록 저장됩니다.
+const ICD11_SEED_LIST = [
+  {code:'BA00.Z', ko:'고혈압', en:'Essential hypertension'},
+  {code:'BA03', ko:'고혈압 위기', en:'Hypertensive crisis'},
+  {code:'5A11', ko:'제2형 당뇨병', en:'Type 2 diabetes mellitus'},
+  {code:'5A10', ko:'제1형 당뇨병', en:'Type 1 diabetes mellitus'},
+  {code:'5A14', ko:'당뇨병(미분류)', en:'Diabetes mellitus, unspecified'},
+  {code:'5C8Z', ko:'이상지질혈증', en:'Dyslipidaemia, unspecified'},
+  {code:'5C80.1', ko:'고중성지방혈증', en:'Hypertriglyceridaemia'},
+  {code:'5A02.Z', ko:'갑상선기능항진증', en:'Hyperthyroidism, unspecified'},
+  {code:'5A00.Z', ko:'갑상선기능저하증', en:'Hypothyroidism, unspecified'},
+  {code:'DA42.Z', ko:'위염', en:'Gastritis'},
+  {code:'DA41.2', ko:'소화성궤양질환(APD)', en:'Acid peptic disease'},
+  {code:'DA60.Z', ko:'위궤양', en:'Gastric ulcer'},
+  {code:'DA63.Z', ko:'십이지장궤양', en:'Duodenal ulcer'},
+  {code:'MD81', ko:'복통', en:'Abdominal pain'},
+  {code:'MD81.2', ko:'전신 복통', en:'Generalised abdominal pain'},
+  {code:'CA23', ko:'천식', en:'Asthma'},
+  {code:'CA22', ko:'만성폐쇄성폐질환(COPD)', en:'Chronic obstructive pulmonary disease'},
+  {code:'CA40.Z', ko:'폐렴', en:'Pneumonia'},
+  {code:'CA2Z', ko:'하기도감염(LRTI)', en:'Lower respiratory tract infection, unspecified'},
+  {code:'CA07.Z', ko:'상기도감염(URTI, 감기)', en:'Upper respiratory tract infection, unspecified'},
+  {code:'CA02.Z', ko:'인두염', en:'Acute pharyngitis'},
+  {code:'CA03', ko:'편도염', en:'Tonsillitis'},
+  {code:'MD36.0', ko:'인후통', en:'Sore throat'},
+  {code:'MD12', ko:'기침', en:'Cough'},
+  {code:'MD11.5', ko:'호흡곤란', en:'Dyspnoea'},
+  {code:'MD30.Z', ko:'흉통', en:'Chest pain'},
+  {code:'ME81.Z', ko:'근골격계 통증', en:'Musculoskeletal pain'},
+  {code:'ME84.Z', ko:'요통', en:'Back pain'},
+  {code:'ME82', ko:'관절통', en:'Joint pain'},
+  {code:'MB4D', ko:'두통', en:'Headache, unspecified'},
+  {code:'8A80.Z', ko:'편두통', en:'Migraine, unspecified'},
+  {code:'MB48.Z', ko:'어지러움', en:'Dizziness/giddiness'},
+  {code:'AB70.2', ko:'귀통증(이통)', en:'Otalgia'},
+  {code:'MG26', ko:'발열', en:'Fever'},
+  {code:'3A00.Z', ko:'빈혈', en:'Anaemia, unspecified'},
+  {code:'GC08', ko:'요로감염(UTI)', en:'Urinary tract infection'},
+  {code:'GB70.0Z', ko:'요로결석(신결석)', en:'Nephrolithiasis'},
+  {code:'MF56', ko:'신산통', en:'Renal colic'},
+  {code:'1G04', ko:'옴(개선증)', en:'Scabies'},
+  {code:'1B75.3', ko:'농양', en:'Abscess'},
+  {code:'1F40', ko:'말라리아(열대열)', en:'Malaria due to Plasmodium falciparum'},
+  {code:'1D20-1D2Z', ko:'뎅기열', en:'Dengue'},
+  {code:'1C12', ko:'호흡기 결핵', en:'Tuberculosis of the respiratory system'},
+  {code:'1C60', ko:'HIV 감염', en:'HIV disease'},
+  {code:'1E51', ko:'B형 간염', en:'Hepatitis B'},
+  {code:'1E50', ko:'A형 간염', en:'Hepatitis A'},
+  {code:'DB90', ko:'급성 위장관염(설사)', en:'Acute infectious gastroenteritis'},
+  {code:'5B5A', ko:'비타민 D 결핍', en:'Vitamin D deficiency'},
+  {code:'5B00', ko:'단백질에너지 영양실조', en:'Protein-energy malnutrition'},
+  {code:'9B71', ko:'백내장', en:'Cataract'},
+  {code:'9A60.0', ko:'결막염', en:'Conjunctivitis'},
+  {code:'EB', ko:'두드러기', en:'Urticaria'},
+  {code:'EK90', ko:'피부진균증', en:'Dermatophytosis'},
+  {code:'MG30.0', ko:'치통', en:'Toothache'},
+  {code:'JA02', ko:'정상 임신 관리', en:'Supervision of normal pregnancy'}
+];
+
+function loadCustomDiagnoses(){
+  db.collection('customDiagnoses').orderBy('ko','asc').onSnapshot(snap=>{
+    customDiagnoses = snap.docs.map(d=>({id:d.id, ...d.data()}));
+  }, err=>console.error('customDiagnoses 로드 실패', err));
+}
+loadCustomDiagnoses();
+
+function allDiagnosisOptions(){
+  return ICD11_SEED_LIST.concat(customDiagnoses);
+}
 
 db.collection('presets').orderBy('createdAt','desc').onSnapshot(snap=>{
   presets = snap.docs.map(d=>({id:d.id, ...d.data()}));
@@ -1155,12 +1395,16 @@ async function openChart(patientId, waitingId, deptIndex){
   activeDeptName = null;
   activeSessionRx = [];
   activeExamOrder = null;
+  activeDraftDiagnoses = [];
+  activeCarriedRxRowThreshold = 0;
   screenName = 'chart';
   renderNav();
   const main = document.getElementById('main');
   main.innerHTML = `<div class="empty-note">불러오는 중...</div>`;
 
   let referralMessageToShow = null;
+  let referralFromInfo = null;
+  let draftNote = null;
 
   if(waitingId){
     try{
@@ -1171,8 +1415,10 @@ async function openChart(patientId, waitingId, deptIndex){
         if(wdata.departments && wdata.departments.length && activeDeptIndex !== null && wdata.departments[activeDeptIndex]){
           const dept = wdata.departments[activeDeptIndex];
           activeDeptName = dept.name;
+          draftNote = dept.draftNote || null; // 검사처방 등으로 화면을 나가기 전 임시 저장해둔 작성중 내용
           if(dept.referralMessage && !dept.referralMessageShown){
             referralMessageToShow = dept.referralMessage;
+            referralFromInfo = {name: dept.referredBy||'', dept: dept.referredByDept||''};
           }
           const updatedDept = {...dept};
           let needsWrite = false;
@@ -1214,17 +1460,33 @@ async function openChart(patientId, waitingId, deptIndex){
 
   main.innerHTML = chartScreenHTML(patient, visits);
   rxRowCount = 0;
-  if(activeSessionRx && activeSessionRx.length){
+  if(draftNote && draftNote.rxItems && draftNote.rxItems.length){
+    draftNote.rxItems.forEach(item => addRxRow(item, true));
+  } else if(activeSessionRx && activeSessionRx.length){
     activeSessionRx.forEach(item => addRxRow(item, true));
   } else {
     addRxRow(null, true);
+  }
+  // 지금까지 채운 행(이전 과가 이미 넣었거나, 검사처방 등으로 나가기 전 내가 임시저장해둔 것)은
+  // "다른 과 처방"으로 취급해 이 과의 처방 집계에서 제외한다. 이 이후에 새로 추가되는 행만 "내 처방".
+  activeCarriedRxRowThreshold = draftNote ? 0 : rxRowCount;
+  if(draftNote){
+    // 검사처방 전달 등으로 화면을 나가기 전 작성 중이던 내용을 그대로 복원
+    const setVal = (id, val)=>{ const el = document.getElementById(id); if(el) el.value = val||''; };
+    setVal('v-bp', draftNote.bp); setVal('v-weight', draftNote.weight); setVal('v-glucose', draftNote.glucose);
+    setVal('v-note', draftNote.note); setVal('v-plan', draftNote.plan);
+    if(draftNote.rxMode){ const rm = document.getElementById('v-rx-mode'); if(rm) rm.value = draftNote.rxMode; }
+    if(Array.isArray(draftNote.diagnoses) && draftNote.diagnoses.length){ activeDraftDiagnoses = draftNote.diagnoses.slice(); renderDiagnosisChips(); }
   }
   const noteEl = document.getElementById('v-note');
   if(noteEl) noteEl.focus();
 
   if(referralMessageToShow){
     const deptNameForMsg = activeDeptName;
-    setTimeout(()=>{ alert(`📋 진료 의뢰 메세지 (${deptNameForMsg}):\n\n${referralMessageToShow}`); }, 300);
+    const fromLabel = referralFromInfo && (referralFromInfo.dept || referralFromInfo.name)
+      ? ` (보낸 곳: ${referralFromInfo.dept || ''}${referralFromInfo.dept && referralFromInfo.name ? ' · ' : ''}${referralFromInfo.name || ''})`
+      : '';
+    setTimeout(()=>{ alert(`📋 진료 의뢰 메세지 (${deptNameForMsg})${fromLabel}:\n\n${referralMessageToShow}`); }, 300);
   }
 
   if(!suppressHistoryPush){
@@ -1278,7 +1540,7 @@ async function submitReferral(){
     const wdata = wDoc.data();
     const depts = (wdata.departments && wdata.departments.length) ? wdata.departments.slice() : [{name:'일반진료', status:'done'}];
     list.forEach(deptName=>{
-      depts.push({name: deptName, status:'waiting', doctorName:null, referredBy: currentUser.name, referralMessage: message || null, referralMessageShown:false});
+      depts.push({name: deptName, status:'waiting', doctorName:null, referredBy: currentUser.name, referredByDept: activeDeptName || currentUser.dept || '', referralMessage: message || null, referralMessageShown:false});
     });
     const overall = computeOverallStatus(depts);
     await wRef.update({departments: depts, status: overall});
@@ -1290,11 +1552,85 @@ async function submitReferral(){
   }
 }
 
+/* ---- 진단명 (ICD-11 검색 후 선택) ---- */
+function diagnosisSectionHTML(){
+  return `
+    <div class="field" style="position:relative;">
+      <label>진단명 검색 (한글 또는 영문, 예: 위염 / gastritis)</label>
+      <input id="dx-search" placeholder="진단명을 입력하세요" autocomplete="off" oninput="onDxSearchInput()">
+      <div id="dx-suggestions" style="display:none; position:absolute; left:0; right:0; background:#fff; border:1px solid var(--line); border-radius:6px; max-height:220px; overflow-y:auto; z-index:20; box-shadow:0 4px 12px rgba(0,0,0,0.12);"></div>
+    </div>
+    <div id="dx-chips" style="display:flex; flex-wrap:wrap; gap:6px; margin:6px 0 10px;">${diagnosisChipsInnerHTML()}</div>
+    <button type="button" class="btn small outline" onclick="addCustomDiagnosisFromPrompt()">+ 목록에 없는 진단명 직접 추가</button>
+    <div class="note" style="margin-top:6px;">내장된 진단명 목록은 자주 쓰는 것 위주로 정리된 참고용입니다. 정확한 코드가 중요한 경우 WHO ICD-11 사이트(icd.who.int/browse11)에서 한번 더 확인해주세요. 직접 추가한 진단명은 이후에도 계속 검색되도록 저장됩니다.</div>
+  `;
+}
+function diagnosisChipsInnerHTML(){
+  if(!activeDraftDiagnoses.length) return '';
+  return activeDraftDiagnoses.map((dx, i)=>`
+    <span class="rx-chip" style="background:var(--paper);">${dx.ko}${dx.en?` (${dx.en})`:''} · ${dx.code} <span style="cursor:pointer; color:var(--rust); margin-left:4px;" onclick="removeDraftDiagnosis(${i})">✕</span></span>
+  `).join('');
+}
+function renderDiagnosisChips(){
+  const el = document.getElementById('dx-chips');
+  if(el) el.innerHTML = diagnosisChipsInnerHTML();
+}
+function onDxSearchInput(){
+  const q = (document.getElementById('dx-search')?.value || '').trim().toLowerCase();
+  const box = document.getElementById('dx-suggestions');
+  if(!box) return;
+  if(!q){ box.style.display = 'none'; box.innerHTML = ''; return; }
+  const matches = allDiagnosisOptions().filter(dx =>
+    (dx.ko && dx.ko.toLowerCase().includes(q)) || (dx.en && dx.en.toLowerCase().includes(q)) || (dx.code && dx.code.toLowerCase().includes(q))
+  ).slice(0, 15);
+  if(matches.length===0){
+    box.style.display = 'block';
+    box.innerHTML = `<div style="padding:10px; font-size:13px; color:var(--ink-soft);">일치하는 진단명이 없습니다. 아래 "+ 목록에 없는 진단명 직접 추가"를 이용해주세요.</div>`;
+    return;
+  }
+  box.style.display = 'block';
+  box.innerHTML = matches.map((dx,i)=>`
+    <div style="padding:9px 12px; border-bottom:1px solid var(--line); cursor:pointer;" onclick='selectDiagnosisFromSearch(${i})'>
+      <b>${dx.ko}</b> ${dx.en?`<span style="color:var(--ink-soft);">(${dx.en})</span>`:''} <span class="mono" style="float:right;">${dx.code}</span>
+    </div>
+  `).join('');
+  window.__dxSearchMatches = matches;
+}
+function selectDiagnosisFromSearch(i){
+  const dx = (window.__dxSearchMatches||[])[i];
+  if(!dx) return;
+  if(!activeDraftDiagnoses.some(d=>d.code===dx.code)) activeDraftDiagnoses.push(dx);
+  renderDiagnosisChips();
+  const searchEl = document.getElementById('dx-search');
+  if(searchEl) searchEl.value = '';
+  const box = document.getElementById('dx-suggestions');
+  if(box){ box.style.display = 'none'; box.innerHTML = ''; }
+}
+function removeDraftDiagnosis(i){
+  activeDraftDiagnoses.splice(i,1);
+  renderDiagnosisChips();
+}
+async function addCustomDiagnosisFromPrompt(){
+  const ko = prompt('진단명(한글)을 입력하세요. 예: 위염');
+  if(!ko) return;
+  const en = prompt('영문 진단명 (선택, 없으면 취소 없이 빈 값으로 두고 확인)') || '';
+  const code = prompt('ICD-11 코드를 입력하세요 (WHO ICD-11 사이트 icd.who.int/browse11 에서 확인 후 입력)');
+  if(!code) return;
+  const dx = {ko: ko.trim(), en: en.trim(), code: code.trim()};
+  try{
+    await db.collection('customDiagnoses').add({...dx, addedBy: currentUser.name, createdAt: firebase.firestore.FieldValue.serverTimestamp()});
+    if(!activeDraftDiagnoses.some(d=>d.code===dx.code)) activeDraftDiagnoses.push(dx);
+    renderDiagnosisChips();
+  }catch(err){
+    alert('진단명 저장 실패: ' + err.message);
+  }
+}
+
 /* ---- 검사 처방 (진료 차트 내) ---- */
 let examRowCount = 0;
 function examSectionHTML(){
   if(!activeWaitingId || activeDeptIndex === null){
-    return `<div class="field"><label>검사 처방</label><div class="note" style="margin:0;">접수(대기 리스트)를 통해 열린 진료과 화면에서만 검사를 전달할 수 있습니다.</div></div>`;
+    return `<h3>검사 처방</h3><div class="note" style="margin:0;">접수(대기 리스트)를 통해 열린 진료과 화면에서만 검사를 전달할 수 있습니다.</div>`;
   }
   const items = activeExamOrder ? (activeExamOrder.items||[]) : [];
   const sentRows = items.map((it, i)=>`
@@ -1304,14 +1640,12 @@ function examSectionHTML(){
     </div>
   `).join('');
   return `
-    <div class="field">
-      <label>검사 처방</label>
-      <div class="rx-preset" id="exam-preset-holder">${examPresetChipsHTML()}</div>
-      <div id="exam-new-rows"></div>
-      <button type="button" class="btn small outline" onclick="addExamRow()">+ 검사 항목 추가</button>
-      ${items.length ? `<div style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--line);"><div style="font-size:12px; color:var(--ink-soft); margin-bottom:6px;">검사실로 이미 전달된 항목 (결과는 검사실에서도 입력되며 여기서도 확인·수정할 수 있습니다)</div>${sentRows}</div>` : ''}
-      <button type="button" class="btn small" style="margin-top:10px;" onclick="sendExamOrder()">🔬 검사 처방 전달</button>
-    </div>
+    <h3>검사 처방</h3>
+    <div class="rx-preset" id="exam-preset-holder">${examPresetChipsHTML()}</div>
+    <div id="exam-new-rows"></div>
+    <button type="button" class="btn small outline" onclick="addExamRow()">+ 검사 항목 추가</button>
+    ${items.length ? `<div style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--line);"><div style="font-size:12px; color:var(--ink-soft); margin-bottom:6px;">검사실로 이미 전달된 항목 (결과는 검사실에서도 입력되며 여기서도 확인·수정할 수 있습니다)</div>${sentRows}</div>` : ''}
+    <button type="button" class="btn small" style="margin-top:10px;" onclick="sendExamOrder()">🔬 검사 처방 전달</button>
   `;
 }
 function examPresetChipsHTML(){
@@ -1385,16 +1719,28 @@ async function sendExamOrder(){
     } else {
       const newDoc = await db.collection('labQueue').add({
         waitingId: activeWaitingId, deptIndex: activeDeptIndex, deptName: dept.name,
-        patientId: activePatientId, patientName: activePatientData.name, regNo: activePatientData.regNo, siteName: activePatientData.siteName,
+        patientId: activePatientId, patientName: activePatientData.name, regNo: activePatientData.regNo, siteName: activePatientData.siteName, testPatient: !!activePatientData.testPatient,
         items: newItems, status:'pending', orderedBy: currentUser.name,
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       examOrderId = newDoc.id;
     }
-    depts[activeDeptIndex] = {...dept, status:'examPending', examOrderId};
+    // 검사실로 넘기면 이 진료과는 "검사대기중"이 되어 검사가 끝날 때까지 차트를 다시 열 수 없으므로,
+    // 지금까지 작성해둔 내용(활력징후/소견/처방/진단명)을 잃어버리지 않도록 임시 저장해둔다.
+    const draftNote = {
+      bp: document.getElementById('v-bp')?.value || '',
+      weight: document.getElementById('v-weight')?.value || '',
+      glucose: document.getElementById('v-glucose')?.value || '',
+      note: document.getElementById('v-note')?.value || '',
+      plan: document.getElementById('v-plan')?.value || '',
+      rxMode: document.getElementById('v-rx-mode')?.value || '',
+      rxItems: collectRxRows(),
+      diagnoses: (typeof activeDraftDiagnoses !== 'undefined') ? activeDraftDiagnoses.slice() : []
+    };
+    depts[activeDeptIndex] = {...dept, status:'examPending', examOrderId, draftNote};
     const overall = computeOverallStatus(depts);
     await wRef.update({departments: depts, status: overall});
-    alert('검사실로 전달되었습니다. 이 환자는 검사가 끝나면 대기 리스트에 "검사완료 대기중"으로 다시 나타납니다.');
+    alert('검사실로 전달되었습니다. 지금까지 작성한 내용은 임시 저장되며, 이 환자는 검사가 끝나면 대기 리스트에 "검사완료 대기중"으로 다시 나타납니다.');
     setScreen('queue');
   }catch(err){
     alert('검사 전달 실패: ' + err.message);
@@ -1639,6 +1985,29 @@ function collectRxRows(){
   return rows;
 }
 
+// 이 진료과가 이번에 "새로" 추가한 약만 골라낸다 (다른 과가 이미 넣어둔 처방은 제외).
+// 진료 기록(타임라인)에는 각 의사가 실제로 처방한 약만 나와야 하기 때문.
+function collectNewRxRows(){
+  const rows = [];
+  const tbody = document.getElementById('rx-table-body');
+  if(!tbody) return rows;
+  tbody.querySelectorAll('tr').forEach(tr=>{
+    const idx = parseInt(tr.id.replace('rx-row-',''), 10);
+    if(idx < activeCarriedRxRowThreshold) return;
+    const drug = document.getElementById(`rx-drug-${idx}`)?.value.trim();
+    if(!drug) return;
+    rows.push({
+      drug,
+      dose: document.getElementById(`rx-dose-${idx}`)?.value.trim() || '',
+      freq: document.getElementById(`rx-freq-${idx}`)?.value || '',
+      duration: document.getElementById(`rx-dur-${idx}`)?.value || '',
+      timing: document.getElementById(`rx-timing-${idx}`)?.value || '',
+      note: document.getElementById(`rx-note-${idx}`)?.value.trim() || ''
+    });
+  });
+  return rows;
+}
+
 function rxItemsToText(items){
   return (items||[]).map(i => `${i.drug} ${i.dose||''} ${i.freq||''} ${i.timing||''} ${i.duration?('x'+i.duration+'일'):''}${i.note?(' ['+i.note+']'):''}`.replace(/\s+/g,' ').trim()).join('\n');
 }
@@ -1651,6 +2020,11 @@ function rxItemsToTableHTML(items){
   return `<table class="chronic-table" style="margin-top:6px;">
     <tr><th>약품명</th><th>용량</th><th>빈도</th><th>시기</th><th>기간</th><th>기타사항</th></tr>${rows}
   </table>`;
+}
+
+// 테스트용 환자임을 프로그램 어디서든 눈에 띄게 표시하기 위한 공용 배지
+function testBadgeHTML(isTest){
+  return isTest ? ' <span class="tag warn" style="background:#fee; color:#c0392b; border-color:#c0392b;">테스트용</span>' : '';
 }
 
 function historyTagsHTML(h){
@@ -1678,7 +2052,7 @@ function chartScreenHTML(patient, visits){
   return `
     <div class="chart-head">
       <div style="flex:1;">
-        <div class="chart-name" id="pinfo-view">${patient.name} <span class="mono" style="font-size:12px; color:var(--ink-soft); font-weight:400;">${patient.regNo}</span>
+        <div class="chart-name" id="pinfo-view">${patient.name}${testBadgeHTML(patient.testPatient)} <span class="mono" style="font-size:12px; color:var(--ink-soft); font-weight:400;">${patient.regNo}</span>
           <span class="hist-edit-toggle" style="font-size:11px; margin-left:8px;" onclick="togglePatientInfoEdit()">정보수정</span>
         </div>
         <div id="pinfo-edit" style="display:none; margin:8px 0;">
@@ -1710,7 +2084,7 @@ function chartScreenHTML(patient, visits){
 
     <div class="card">
       <div class="hist-edit-row"><h3 style="margin:0; border:none; padding:0;">과거력</h3><span class="hist-edit-toggle" onclick="toggleHistEdit()" id="hist-toggle-label">수정</span></div>
-      <div id="hist-view"><p style="font-size:13px; color:var(--ink-soft); margin-top:10px;">기타사항: ${patient.historyNote || '-'}</p></div>
+      <div id="hist-view"><p style="font-size:13px; color:var(--ink-soft); margin-top:10px; white-space:pre-wrap;">기타사항: ${patient.historyNote || '-'}</p></div>
       <div id="hist-edit" style="display:none;">
         <div class="checks" style="margin:10px 0;">
           <div class="chk"><input type="checkbox" id="e-h-htn" ${h.hypertension?'checked':''}>고혈압</div>
@@ -1744,18 +2118,27 @@ function chartScreenHTML(patient, visits){
         <div class="field"><label>체중 (kg)</label><input id="v-weight" type="number"></div>
         <div class="field"><label>공복혈당 (FBS, mg/dL)</label><input id="v-glucose" type="number" placeholder="예: 110"></div>
       </div>
-      <div class="field"><label>Progress Note</label><textarea id="v-note" rows="6" lang="en"></textarea></div>
+      <div class="field"><label>Progress Note</label><textarea id="v-note" rows="8" lang="en" style="max-height:480px; overflow-y:auto;"></textarea></div>
+    </div>
+
+    <div class="card">
       ${examSectionHTML()}
-      <div class="field">
-        <label>처방</label>
-        <div class="rx-preset" id="rx-preset-holder">${presetChipsHTML()}</div>
-        <table class="chronic-table" style="margin-bottom:8px;">
-          <tr><th>약품명</th><th>1회 투약량</th><th>1일 횟수</th><th>총 투약일</th><th>투약 시기</th><th>기타사항</th><th></th></tr>
-          <tbody id="rx-table-body"></tbody>
-        </table>
-        <button class="btn small outline" onclick="addRxRowWithDefaults()">+ 약 추가</button>
-        <button class="btn small outline" onclick="repeatLastPrescription()">🔁 지난 처방 반복</button>
-      </div>
+    </div>
+
+    <div class="card">
+      <h3>진단명</h3>
+      ${diagnosisSectionHTML()}
+    </div>
+
+    <div class="card">
+      <h3>약처방</h3>
+      <div class="rx-preset" id="rx-preset-holder">${presetChipsHTML()}</div>
+      <table class="chronic-table" style="margin-bottom:8px;">
+        <tr><th>약품명</th><th>1회 투약량</th><th>1일 횟수</th><th>총 투약일</th><th>투약 시기</th><th>기타사항</th><th></th></tr>
+        <tbody id="rx-table-body"></tbody>
+      </table>
+      <button class="btn small outline" onclick="addRxRowWithDefaults()">+ 약 추가</button>
+      <button class="btn small outline" onclick="repeatLastPrescription()">🔁 지난 처방 반복</button>
       <div class="field" style="margin-top:12px;">
         <label>처방 처리 방식</label>
         <select id="v-rx-mode">
@@ -1763,6 +2146,9 @@ function chartScreenHTML(patient, visits){
           <option value="pharmacy">약국으로 전송 (단기팀 방문 시)</option>
         </select>
       </div>
+    </div>
+
+    <div class="card">
       <div class="field"><label>향후 계획</label><textarea id="v-plan" rows="2"></textarea></div>
       <button class="btn small outline" type="button" onclick="toggleQuickAppt()">📅 다음 방문 예약하기</button>
       <div id="quick-appt-form" style="display:none; background:var(--paper); padding:12px; border-radius:8px; margin-top:8px;">
@@ -1787,20 +2173,42 @@ function chartScreenHTML(patient, visits){
 }
 
 // 환자의 전체 진료 기록을 날짜 오름차순(오래된 것 → 최근 것)으로 쭉 이어서 보여주는 타임라인.
-// 한 방문(세션) 안에서 여러 진료과가 이어 쓴 내용은 이미 progressNote 안에 서명과 함께 합쳐져 저장되어 있으므로
-// 그대로 줄바꿈을 살려서 출력한다. 과거 기록은 다른 의사가 임의로 고칠 수 없도록 읽기 전용으로만 표시한다.
+// 프로그레스 노트뿐 아니라 그날 실제로 작성된 진단명·검사결과·약처방(표 형식)까지 전부 보여주며,
+// 과거력은 여기 포함하지 않는다(과거력은 별도 카드에 항상 표시됨). 다른 의사의 기록은 읽기 전용이다.
 function visitTimelineHTML(visits){
   if(!visits || visits.length===0) return '<div class="empty-note">이전 기록이 없습니다.</div>';
-  return visits.map(v=>`
-    <div class="timeline-entry" id="timeline-${v.id}">
-      <div class="tdate">${fmtDate(v.date)}</div>
-      ${v.progressNote ? `<p style="white-space:pre-wrap; margin:6px 0;">${v.progressNote}</p>` : '<p style="color:var(--ink-soft); margin:6px 0;">(작성된 소견 없음)</p>'}
-      ${(v.photoURL || v.pdfURL) ? `<div class="attach-row">
+  const body = visits.map(v=>{
+    const attach = (v.photoURL || v.pdfURL) ? `<div class="attach-row">
         ${v.photoURL?`<a class="attach-chip" href="${v.photoURL}" target="_blank">📷 사진 보기</a>`:''}
         ${v.pdfURL?`<a class="attach-chip" href="${v.pdfURL}" target="_blank">📄 PDF 보기</a>`:''}
-      </div>` : ''}
-    </div>
-  `).join('');
+      </div>` : '';
+    if(Array.isArray(v.deptEntries) && v.deptEntries.length){
+      const blocks = v.deptEntries.map(deptEntryBlockHTML).join('<hr style="border:none; border-top:1px dashed var(--line); margin:10px 0;">');
+      return `<div class="timeline-entry" id="timeline-${v.id}"><div class="tdate">${fmtDate(v.date)}</div>${blocks}${attach}</div>`;
+    }
+    // 이번 업데이트 이전 방식으로 저장된 옛 기록과의 호환 표시
+    return `<div class="timeline-entry" id="timeline-${v.id}">
+      <div class="tdate">${fmtDate(v.date)}</div>
+      ${v.progressNote ? `<p style="white-space:pre-wrap; margin:6px 0;">${v.progressNote}</p>` : '<p style="color:var(--ink-soft); margin:6px 0;">(작성된 소견 없음)</p>'}
+      ${v.prescriptionItems && v.prescriptionItems.length ? `<div style="margin-top:6px;"><b>약처방</b>${rxItemsToTableHTML(v.prescriptionItems)}</div>` : (v.prescription?`<p style="white-space:pre-wrap;">${v.prescription}</p>`:'')}
+      ${attach}
+    </div>`;
+  }).join('');
+  return `<div style="max-height:520px; overflow-y:auto; padding-right:4px;">${body}</div>`;
+}
+
+// 진료 기록 안에서 한 진료과의 기록 한 블록 (소견 → 진단명 → 검사결과 → 약처방(표) → 향후계획 → 서명 순서)
+function deptEntryBlockHTML(e){
+  const noteText = e.note && e.note.trim() ? e.note.trim() : '(작성된 소견 없음)';
+  const dxHTML = (e.diagnoses && e.diagnoses.length)
+    ? `<div style="margin-top:6px; font-size:13px;"><b>진단명:</b> ${e.diagnoses.map(d=>`${d.ko}${d.en?`(${d.en})`:''} · ${d.code}`).join(', ')}</div>` : '';
+  const examHTML = (e.examItems && e.examItems.length)
+    ? `<div style="margin-top:6px; font-size:13px;"><b>검사결과:</b> ${e.examItems.map(it=>`${it.name}${it.result?(': '+it.result):' (결과 미기재)'}`).join(', ')}</div>` : '';
+  const rxHTML = (e.rxItems && e.rxItems.length)
+    ? `<div style="margin-top:6px;"><b style="font-size:13px;">약처방</b>${rxItemsToTableHTML(e.rxItems)}</div>` : '';
+  const planHTML = (e.plan && e.plan.trim()) ? `<div style="margin-top:6px; font-size:13px;"><b>향후계획:</b> ${e.plan.trim()}</div>` : '';
+  const sig = `<div style="margin-top:6px; font-size:12px; color:var(--ink-soft);">&lt;${e.deptName} ${e.doctorName}&gt; ${e.completedAt ? formatSignatureTimestamp(new Date(e.completedAt)) : ''}</div>`;
+  return `<div><div style="font-weight:700; font-size:15px; margin-bottom:4px;">[${e.deptName}]</div><p style="white-space:pre-wrap; margin:4px 0;">${noteText}</p>${dxHTML}${examHTML}${rxHTML}${planHTML}${sig}</div>`;
 }
 
 function toggleHistEdit(){
@@ -1875,7 +2283,7 @@ async function saveHistory(){
     const tagRow = document.getElementById('chart-tag-row');
     if(tagRow) tagRow.innerHTML = historyTagsHTML(history);
     const histView = document.getElementById('hist-view');
-    if(histView) histView.innerHTML = `<p style="font-size:13px; color:var(--ink-soft); margin-top:10px;">기타사항: ${historyNote || '-'}</p>`;
+    if(histView) histView.innerHTML = `<p style="font-size:13px; color:var(--ink-soft); margin-top:10px; white-space:pre-wrap;">기타사항: ${historyNote || '-'}</p>`;
     toggleHistEdit();
     alert('과거력이 저장되었습니다.');
   }catch(err){
@@ -1903,7 +2311,7 @@ function hasClinicalContent(){
   const plan = document.getElementById('v-plan')?.value.trim();
   const pdf = document.getElementById('v-pdf')?.files.length;
   const rxItems = collectRxRows();
-  return !!(bp || weight || glucose || note || plan || pdf || rxItems.length>0);
+  return !!(bp || weight || glucose || note || plan || pdf || rxItems.length>0 || (activeDraftDiagnoses && activeDraftDiagnoses.length>0));
 }
 
 // "2026. 07. 15. 11:58 AM" 형식의 서명용 타임스탬프
@@ -1919,21 +2327,13 @@ function formatSignatureTimestamp(d){
   return `${yyyy}. ${mm}. ${dd}. ${hh}:${mi} ${ampm}`;
 }
 
-// 한 진료과가 완료 처리를 누른 시점에 Progress Note에 이어붙일 텍스트 블록 생성.
-// 소견 텍스트뿐 아니라 처방/검사결과/향후계획도 함께 자동으로 녹여 넣어서,
-// 하나의 진료 기록만 봐도 그날 그 과에서 무엇을 했는지 전부 알 수 있게 한다.
-function buildDeptEntryText({deptName, doctorName, note, rxItems, examItems, plan, when}){
+// 한 진료과가 완료 처리를 누른 시점에 Progress Note(텍스트)에 이어붙일 블록.
+// 처방/검사결과/진단명은 여기 텍스트에 녹이지 않고 deptEntry의 구조화된 필드로 따로 저장해서,
+// 진료 기록 화면에서 검사결과·약처방(표)·진단명을 각각 보기 좋게 구분해서 보여준다.
+function buildDeptEntryText({deptName, doctorName, note, when}){
   const label = deptName || '일반진료';
   const lines = [`[${label}]`];
-  if(note && note.trim()) lines.push(note.trim());
-  if(rxItems && rxItems.length){
-    lines.push('처방: ' + rxItemsToText(rxItems).split('\n').join(' / '));
-  }
-  if(examItems && examItems.length){
-    const examText = examItems.map(it=> `${it.name}${it.result ? (' - '+it.result) : ' (결과 미기재)'}`).join(', ');
-    lines.push(`검사결과: ${examText}`);
-  }
-  if(plan && plan.trim()) lines.push(`계획: ${plan.trim()}`);
+  lines.push(note && note.trim() ? note.trim() : '(작성된 소견 없음)');
   lines.push(`<${label} ${doctorName}> ${formatSignatureTimestamp(when)}`);
   return lines.join('\n');
 }
@@ -1983,10 +2383,12 @@ async function saveVisit(silent){
     const now = new Date();
     const deptLabel = activeDeptName || currentUser.dept || '일반진료';
     const examItems = activeExamOrder ? (activeExamOrder.items||[]) : [];
-    const entryText = buildDeptEntryText({deptName: deptLabel, doctorName: currentUser.name, note: noteInput, rxItems: prescriptionItems, examItems, plan, when: now});
+    const ownNewRxItems = collectNewRxRows(); // 다른 과가 이미 넣어둔 처방은 제외, 이 과가 새로 추가한 것만
+    const diagnoses = (activeDraftDiagnoses||[]).slice();
+    const entryText = buildDeptEntryText({deptName: deptLabel, doctorName: currentUser.name, note: noteInput, when: now});
     const deptEntry = {
       deptName: deptLabel, doctorName: currentUser.name,
-      note: noteInput, prescription, prescriptionItems, plan, examItems,
+      note: noteInput, rxItems: ownNewRxItems, examItems, diagnoses, plan,
       completedAt: now.toISOString()
     };
 
@@ -2047,6 +2449,7 @@ async function saveVisit(silent){
         patientName: activePatientData.name,
         regNo: activePatientData.regNo,
         siteName: activePatientData.siteName,
+        testPatient: !!activePatientData.testPatient,
         prescription, prescriptionItems,
         status: 'waiting',
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -2063,11 +2466,32 @@ async function saveVisit(silent){
   }
 }
 
+// "과거력 저장" 버튼을 따로 안 눌러도, 진료 완료 처리 시 편집 중이던 과거력을 자동으로 저장.
+async function saveHistorySilently(){
+  const editEl = document.getElementById('hist-edit');
+  if(!editEl || editEl.style.display === 'none') return; // 지금 과거력을 편집 중이 아니면 아무것도 하지 않음
+  const history = {
+    hypertension: document.getElementById('e-h-htn').checked,
+    diabetes: document.getElementById('e-h-dm').checked,
+    tb: document.getElementById('e-h-tb').checked,
+    hepatitis: document.getElementById('e-h-hep').checked,
+    hiv: document.getElementById('e-h-hiv').checked,
+    drugAllergy: document.getElementById('e-h-allergy').checked,
+    surgery: document.getElementById('e-h-surgery').checked
+  };
+  const historyNote = document.getElementById('e-h-note').value;
+  try{
+    await db.collection('patients').doc(activePatientId).update({history, historyNote});
+    if(activePatientData){ activePatientData.history = history; activePatientData.historyNote = historyNote; }
+  }catch(err){ console.error('과거력 자동저장 실패', err); }
+}
+
 let isCompletingVisit = false;
 async function completeVisit(){
   if(isCompletingVisit) return; // 중복 클릭으로 인한 진료 기록 중복 생성 방지
   isCompletingVisit = true;
   try{
+    await saveHistorySilently();
     if(hasUnsavedVisitContent()){
       try{
         await saveVisit(true);
@@ -2086,7 +2510,7 @@ async function completeVisit(){
         if(wdata.departments && wdata.departments.length){
           const depts = wdata.departments.slice();
           if(activeDeptIndex !== null && depts[activeDeptIndex]){
-            depts[activeDeptIndex] = {...depts[activeDeptIndex], status:'done', doctorName: currentUser.name, completedAt: new Date().toISOString()};
+            depts[activeDeptIndex] = {...depts[activeDeptIndex], status:'done', doctorName: currentUser.name, completedAt: new Date().toISOString(), draftNote: null};
           }
           const overall = computeOverallStatus(depts);
           isLastDept = overall === 'done';
@@ -2103,6 +2527,7 @@ async function completeVisit(){
               patientName: activePatientData.name,
               regNo: activePatientData.regNo,
               siteName: activePatientData.siteName,
+              testPatient: !!activePatientData.testPatient,
               prescription: presText, prescriptionItems: items,
               status: 'waiting',
               createdAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -2328,7 +2753,7 @@ function renderLab(){
         const itemNames = (l.items||[]).map(i=>i.name).join(', ');
         return `<div class="queue-card" onclick="openLabOrder('${d.id}')">
           <div class="qc-info">
-            <div class="name">${l.patientName} <span class="pharm-status">${l.deptName}</span></div>
+            <div class="name">${l.patientName}${testBadgeHTML(l.testPatient)} <span class="pharm-status">${l.deptName}</span></div>
             <div class="meta">${l.regNo} · ${l.siteName} · ${itemNames}</div>
           </div>
         </div>`;
@@ -2343,23 +2768,25 @@ function openLabOrder(id){
   db.collection('labQueue').doc(id).get().then(doc=>{
     if(!doc.exists) return;
     const l = doc.data();
+    const editable = canEditArea('lab');
     openSidePanel(`
       <div class="history-panel-head">
         <span>${l.patientName} (${l.regNo}) · ${l.deptName} 검사</span>
         <span style="cursor:pointer;" onclick="closeSidePanel()">✕ 닫기</span>
       </div>
       <div class="history-panel-body">
-        <div id="lab-order-items">${labOrderItemsHTML(id, l.items||[])}</div>
-        <button class="btn small" style="margin-top:14px;" onclick="completeLabOrder('${id}')">✅ 검사 완료</button>
+        ${!editable ? '<div class="note" style="margin-bottom:10px;">보기 전용입니다 (검사실 역할만 결과 입력·완료 처리가 가능합니다).</div>' : ''}
+        <div id="lab-order-items">${labOrderItemsHTML(id, l.items||[], editable)}</div>
+        ${editable ? `<button class="btn small" style="margin-top:14px;" onclick="completeLabOrder('${id}')">✅ 검사 완료</button>` : ''}
       </div>
     `);
   });
 }
-function labOrderItemsHTML(orderId, items){
+function labOrderItemsHTML(orderId, items, editable){
   return items.map((it,i)=>`
     <div class="field">
       <label>${it.name}</label>
-      <textarea rows="2" placeholder="결과 입력" onchange="updateLabResult('${orderId}',${i},this.value)">${it.result||''}</textarea>
+      <textarea rows="2" placeholder="결과 입력" ${editable?'':'disabled'} onchange="updateLabResult('${orderId}',${i},this.value)">${it.result||''}</textarea>
     </div>
   `).join('');
 }
@@ -2474,7 +2901,7 @@ function renderPharmacy(){
           const p = patientMap[pid] || {};
           return `<div class="queue-card" style="flex-wrap:wrap; cursor:pointer;" onclick="togglePharmRx('direct-${v.id}')">
             <div class="qc-info">
-              <div class="name">${p.name||'(알 수 없음)'} <span class="pharm-status">진료실 투약 완료</span></div>
+              <div class="name">${p.name||'(알 수 없음)'}${testBadgeHTML(p.testPatient)} <span class="pharm-status">진료실 투약 완료</span></div>
               <div class="meta">${p.regNo||'-'} · ${p.siteName||'-'} · <span style="text-decoration:underline;">처방 보기</span></div>
             </div>
             <div id="pharm-rx-direct-${v.id}" style="display:none; width:100%; font-size:12.5px; color:var(--ink-soft); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${pharmRxDisplayHTML(v.data().prescriptionItems, v.data().prescription)}</div>
@@ -2501,7 +2928,7 @@ function renderPharmacy(){
           const p = d.data();
           return `<div class="queue-card" style="flex-wrap:wrap; cursor:pointer;" onclick="togglePharmRx('${d.id}')">
             <div class="qc-info">
-              <div class="name">${p.patientName} <span class="pharm-status">완료</span></div>
+              <div class="name">${p.patientName}${testBadgeHTML(p.testPatient)} <span class="pharm-status">완료</span></div>
               <div class="meta">${p.regNo} · ${p.siteName} · ${p.dispensedBy?('투약: '+p.dispensedBy):''} · <span style="text-decoration:underline;">처방 보기</span></div>
             </div>
             <div id="pharm-rx-${d.id}" style="display:none; width:100%; font-size:12.5px; color:var(--ink-soft); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${pharmRxDisplayHTML(p.prescriptionItems, p.prescription)}</div>
@@ -2528,10 +2955,10 @@ function renderPharmacy(){
         const nextLabel = p.status==='waiting' ? '조제완료 처리' : '투약/복약지도 완료';
         return `<div class="queue-card" style="flex-wrap:wrap; cursor:pointer;" onclick="togglePharmRx('${d.id}')">
           <div class="qc-info">
-            <div class="name">${p.patientName} <span class="pharm-status">${statusLabel}</span></div>
+            <div class="name">${p.patientName}${testBadgeHTML(p.testPatient)} <span class="pharm-status">${statusLabel}</span></div>
             <div class="meta">${p.regNo} · ${p.siteName} · <span style="text-decoration:underline;">처방 보기</span></div>
           </div>
-          <button class="btn small" onclick="event.stopPropagation(); advancePharmacy('${d.id}','${p.status}')">${nextLabel}</button>
+          ${canEditArea('pharmacy') ? `<button class="btn small" onclick="event.stopPropagation(); advancePharmacy('${d.id}','${p.status}')">${nextLabel}</button>` : ''}
           <div id="pharm-rx-${d.id}" style="display:none; width:100%; font-size:12.5px; color:var(--ink-soft); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${pharmRxDisplayHTML(p.prescriptionItems, p.prescription)}</div>
         </div>`;
       }).join('');
