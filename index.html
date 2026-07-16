@@ -696,6 +696,9 @@ async function getTodayVisitedPatients(){
   return Object.entries(latestByPatient).map(([pid, {ms}])=>{
     const p = patientMap[pid] || {};
     return {patientId: pid, name: p.name||'(알 수 없음)', regNo: p.regNo||'-', gender:p.gender, age:p.age, siteName: p.siteName||'-', ms};
+  }).filter(x=>{
+    const p = patientMap[x.patientId];
+    return !(p && p.testPatient);
   }).sort((a,b)=> b.ms - a.ms);
 }
 
@@ -1581,6 +1584,25 @@ function rxRowHTML(idx, item){
     </tr>`;
 }
 
+// "+ 약 추가" 버튼용: 이미 입력된 1번째(첫 줄) 약의 1일 횟수/총 투약일/투약 시기를 기본값으로 물려받아 새 줄을 추가.
+// 약품명/용량/기타사항은 약마다 다르므로 비워두고, 필요하면 새 줄에서 개별로 값을 바꿀 수 있다.
+function addRxRowWithDefaults(){
+  const tbody = document.getElementById('rx-table-body');
+  let defaults = {};
+  if(tbody){
+    const firstRow = tbody.querySelector('tr');
+    if(firstRow){
+      const idx = firstRow.id.replace('rx-row-','');
+      defaults = {
+        freq: document.getElementById(`rx-freq-${idx}`)?.value || '',
+        duration: document.getElementById(`rx-dur-${idx}`)?.value || '',
+        timing: document.getElementById(`rx-timing-${idx}`)?.value || ''
+      };
+    }
+  }
+  addRxRow(defaults);
+}
+
 function addRxRow(item, noFocus){
   const idx = rxRowCount++;
   const tbody = document.getElementById('rx-table-body');
@@ -1711,7 +1733,12 @@ function chartScreenHTML(patient, visits){
     </div>` : ''}
 
     <div class="card">
-      <h3>오늘 진료 기록 작성</h3>
+      <h3>진료 기록</h3>
+      <div id="visit-timeline">${visitTimelineHTML(visits)}</div>
+    </div>
+
+    <div class="card">
+      <h3>오늘 진료 기록 작성${activeDeptName ? ' · ' + activeDeptName : ''}</h3>
       <div class="grid2" style="margin-bottom:12px;">
         <div class="field"><label>혈압</label><input id="v-bp" placeholder="예: 138/86"></div>
         <div class="field"><label>체중 (kg)</label><input id="v-weight" type="number"></div>
@@ -1726,7 +1753,7 @@ function chartScreenHTML(patient, visits){
           <tr><th>약품명</th><th>1회 투약량</th><th>1일 횟수</th><th>총 투약일</th><th>투약 시기</th><th>기타사항</th><th></th></tr>
           <tbody id="rx-table-body"></tbody>
         </table>
-        <button class="btn small outline" onclick="addRxRow()">+ 약 추가</button>
+        <button class="btn small outline" onclick="addRxRowWithDefaults()">+ 약 추가</button>
         <button class="btn small outline" onclick="repeatLastPrescription()">🔁 지난 처방 반복</button>
       </div>
       <div class="field" style="margin-top:12px;">
@@ -1754,88 +1781,26 @@ function chartScreenHTML(patient, visits){
         <label>PDF 첨부</label>
         <input type="file" id="v-pdf" accept="application/pdf">
       </div>
-      <div class="note" style="margin-top:10px;">별도의 저장 버튼은 없습니다 — 상단의 "진료 완료 처리"를 누르면 지금 작성한 내용이 자동으로 저장됩니다.</div>
-    </div>
-
-    <div class="card">
-      <h3>이전 진료 기록</h3>
-      <button class="btn small outline" onclick="openHistoryPanel()">이전 진료 기록 보기 (${visits.length}건)</button>
+      <div class="note" style="margin-top:10px;">별도의 저장 버튼은 없습니다 — 상단의 "진료 완료 처리"를 누르면 지금 작성한 내용이 자동으로 저장됩니다. 같은 접수에서 다른 과가 이미 기록을 남겼다면, 그 내용은 위 진료 기록에 이어서 표시되며 수정할 수 없습니다.</div>
     </div>
   `;
 }
 
-function historyPanelTimelineHTML(){
-  if(activeVisitsCache.length===0) return '<div class="empty-note">이전 기록이 없습니다.</div>';
-  return activeVisitsCache.map(v=>`
+// 환자의 전체 진료 기록을 날짜 오름차순(오래된 것 → 최근 것)으로 쭉 이어서 보여주는 타임라인.
+// 한 방문(세션) 안에서 여러 진료과가 이어 쓴 내용은 이미 progressNote 안에 서명과 함께 합쳐져 저장되어 있으므로
+// 그대로 줄바꿈을 살려서 출력한다. 과거 기록은 다른 의사가 임의로 고칠 수 없도록 읽기 전용으로만 표시한다.
+function visitTimelineHTML(visits){
+  if(!visits || visits.length===0) return '<div class="empty-note">이전 기록이 없습니다.</div>';
+  return visits.map(v=>`
     <div class="timeline-entry" id="timeline-${v.id}">
-      <div class="tdate">${fmtDate(v.date)} · ${v.createdBy? (v.createdBy.dept?v.createdBy.dept+' · ':'')+v.createdBy.name : ''}
-        <span class="hist-edit-toggle" style="margin-left:8px;" onclick="toggleVisitEdit('${v.id}')">수정</span>
-      </div>
-      <div id="view-${v.id}">
-        ${v.progressNote?`<div class="tsection">Progress Note</div><p>${v.progressNote}</p>`:''}
-        ${v.prescriptionItems && v.prescriptionItems.length ? `<div class="tsection">처방</div>${rxItemsToTableHTML(v.prescriptionItems)}` : (v.prescription?`<div class="tsection">처방</div><p>${v.prescription}</p>`:'')}
-        ${v.plan?`<div class="tsection">향후계획</div><p>${v.plan}</p>`:''}
-        ${(v.photoURL || v.pdfURL) ? `<div class="tsection">첨부파일</div><div class="attach-row">
-          ${v.photoURL?`<a class="attach-chip" href="${v.photoURL}" target="_blank">📷 사진 보기</a>`:''}
-          ${v.pdfURL?`<a class="attach-chip" href="${v.pdfURL}" target="_blank">📄 PDF 보기</a>`:''}
-        </div>` : ''}
-      </div>
-      <div id="edit-${v.id}" style="display:none; background:var(--paper); padding:10px; border-radius:8px; margin-top:6px;">
-        <div class="field"><label>Progress Note</label><textarea id="ev-note-${v.id}" rows="3">${v.progressNote||''}</textarea></div>
-        <div class="field"><label>처방 (텍스트)</label><textarea id="ev-rx-${v.id}" rows="2">${v.prescription||''}</textarea></div>
-        <div class="field"><label>향후계획</label><textarea id="ev-plan-${v.id}" rows="2">${v.plan||''}</textarea></div>
-        <button class="btn small" onclick="saveVisitEdit('${v.id}')">수정 저장</button>
-      </div>
+      <div class="tdate">${fmtDate(v.date)}</div>
+      ${v.progressNote ? `<p style="white-space:pre-wrap; margin:6px 0;">${v.progressNote}</p>` : '<p style="color:var(--ink-soft); margin:6px 0;">(작성된 소견 없음)</p>'}
+      ${(v.photoURL || v.pdfURL) ? `<div class="attach-row">
+        ${v.photoURL?`<a class="attach-chip" href="${v.photoURL}" target="_blank">📷 사진 보기</a>`:''}
+        ${v.pdfURL?`<a class="attach-chip" href="${v.pdfURL}" target="_blank">📄 PDF 보기</a>`:''}
+      </div>` : ''}
     </div>
   `).join('');
-}
-
-function openHistoryPanel(){
-  let panel = document.getElementById('history-panel');
-  if(!panel){
-    panel = document.createElement('div');
-    panel.id = 'history-panel';
-    panel.className = 'history-panel';
-    document.body.appendChild(panel);
-  }
-  panel.innerHTML = `
-    <div class="history-panel-head">
-      <span>이전 진료 기록</span>
-      <span style="cursor:pointer;" onclick="closeHistoryPanel()">✕ 닫기</span>
-    </div>
-    <div class="history-panel-body">${historyPanelTimelineHTML()}</div>
-  `;
-  panel.classList.add('open');
-}
-
-function closeHistoryPanel(){
-  const panel = document.getElementById('history-panel');
-  if(panel) panel.classList.remove('open');
-}
-
-function toggleVisitEdit(id){
-  const v = document.getElementById(`view-${id}`);
-  const e = document.getElementById(`edit-${id}`);
-  const editing = e.style.display !== 'none';
-  e.style.display = editing ? 'none' : 'block';
-  v.style.display = editing ? 'block' : 'none';
-}
-
-async function saveVisitEdit(id){
-  const progressNote = document.getElementById(`ev-note-${id}`).value;
-  const prescription = document.getElementById(`ev-rx-${id}`).value;
-  const plan = document.getElementById(`ev-plan-${id}`).value;
-  try{
-    await db.collection('patients').doc(activePatientId).collection('visits').doc(id).update({
-      progressNote, prescription, plan
-    });
-    alert('수정되었습니다.');
-    const idx = activeVisitsCache.findIndex(v=>v.id===id);
-    if(idx>-1){ activeVisitsCache[idx].progressNote = progressNote; activeVisitsCache[idx].prescription = prescription; activeVisitsCache[idx].plan = plan; }
-    openHistoryPanel();
-  }catch(err){
-    alert('수정 실패: ' + err.message);
-  }
 }
 
 function toggleHistEdit(){
@@ -1941,6 +1906,38 @@ function hasClinicalContent(){
   return !!(bp || weight || glucose || note || plan || pdf || rxItems.length>0);
 }
 
+// "2026. 07. 15. 11:58 AM" 형식의 서명용 타임스탬프
+function formatSignatureTimestamp(d){
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  let h = d.getHours();
+  const ampm = h>=12 ? 'PM' : 'AM';
+  h = h % 12; if(h===0) h = 12;
+  const hh = String(h).padStart(2,'0');
+  const mi = String(d.getMinutes()).padStart(2,'0');
+  return `${yyyy}. ${mm}. ${dd}. ${hh}:${mi} ${ampm}`;
+}
+
+// 한 진료과가 완료 처리를 누른 시점에 Progress Note에 이어붙일 텍스트 블록 생성.
+// 소견 텍스트뿐 아니라 처방/검사결과/향후계획도 함께 자동으로 녹여 넣어서,
+// 하나의 진료 기록만 봐도 그날 그 과에서 무엇을 했는지 전부 알 수 있게 한다.
+function buildDeptEntryText({deptName, doctorName, note, rxItems, examItems, plan, when}){
+  const label = deptName || '일반진료';
+  const lines = [`[${label}]`];
+  if(note && note.trim()) lines.push(note.trim());
+  if(rxItems && rxItems.length){
+    lines.push('처방: ' + rxItemsToText(rxItems).split('\n').join(' / '));
+  }
+  if(examItems && examItems.length){
+    const examText = examItems.map(it=> `${it.name}${it.result ? (' - '+it.result) : ' (결과 미기재)'}`).join(', ');
+    lines.push(`검사결과: ${examText}`);
+  }
+  if(plan && plan.trim()) lines.push(`계획: ${plan.trim()}`);
+  lines.push(`<${label} ${doctorName}> ${formatSignatureTimestamp(when)}`);
+  return lines.join('\n');
+}
+
 async function saveVisit(silent){
   try{
     const photoFile = document.getElementById('v-photo').files[0];
@@ -1961,7 +1958,7 @@ async function saveVisit(silent){
     const bp = document.getElementById('v-bp').value;
     const weight = document.getElementById('v-weight').value;
     const glucose = document.getElementById('v-glucose').value;
-    const progressNote = document.getElementById('v-note').value;
+    const noteInput = document.getElementById('v-note').value;
     const prescriptionItems = collectRxRows();
     const prescription = rxItemsToText(prescriptionItems);
     const plan = document.getElementById('v-plan').value;
@@ -1983,12 +1980,59 @@ async function saveVisit(silent){
       pdfURL = await ref.getDownloadURL();
     }
 
-    await db.collection('patients').doc(activePatientId).collection('visits').add({
-      date: firebase.firestore.FieldValue.serverTimestamp(),
-      bp, weight, glucose, progressNote, prescription, prescriptionItems, plan, photoURL, pdfURL,
-      dispenseMode: rxMode,
-      createdBy: { name: currentUser.name, dept: activeDeptName || currentUser.dept || '' }
-    });
+    const now = new Date();
+    const deptLabel = activeDeptName || currentUser.dept || '일반진료';
+    const examItems = activeExamOrder ? (activeExamOrder.items||[]) : [];
+    const entryText = buildDeptEntryText({deptName: deptLabel, doctorName: currentUser.name, note: noteInput, rxItems: prescriptionItems, examItems, plan, when: now});
+    const deptEntry = {
+      deptName: deptLabel, doctorName: currentUser.name,
+      note: noteInput, prescription, prescriptionItems, plan, examItems,
+      completedAt: now.toISOString()
+    };
+
+    // 같은 접수 세션(waitingId) 안에서 다른 진료과가 먼저 저장했는지 확인 -> 있으면 그 문서에 이어쓰기,
+    // 없으면(이 세션의 첫 저장, 또는 접수 세션 없이 차트만 여는 경우) 새 방문 문서를 만든다.
+    let existingVisitId = null;
+    let wRefForSession = null;
+    if(activeWaitingId){
+      wRefForSession = db.collection('waitingList').doc(activeWaitingId);
+      const wSnap = await wRefForSession.get();
+      if(wSnap.exists) existingVisitId = wSnap.data().visitId || null;
+    }
+
+    if(existingVisitId){
+      const visitRef = db.collection('patients').doc(activePatientId).collection('visits').doc(existingVisitId);
+      const prevSnap = await visitRef.get();
+      const prev = prevSnap.exists ? prevSnap.data() : {};
+      const combinedNote = (prev.progressNote ? prev.progressNote + '\n\n' : '') + entryText;
+      const combinedEntries = Array.isArray(prev.deptEntries) ? prev.deptEntries.concat([deptEntry]) : [deptEntry];
+      await visitRef.update({
+        progressNote: combinedNote,
+        deptEntries: combinedEntries,
+        bp: bp || prev.bp || '',
+        weight: weight || prev.weight || '',
+        glucose: glucose || prev.glucose || '',
+        prescription, prescriptionItems,
+        plan: plan || prev.plan || '',
+        photoURL: photoURL || prev.photoURL || null,
+        pdfURL: pdfURL || prev.pdfURL || null,
+        dispenseMode: rxMode,
+        lastUpdatedBy: { name: currentUser.name, dept: deptLabel }
+      });
+    } else {
+      const newVisitRef = await db.collection('patients').doc(activePatientId).collection('visits').add({
+        date: firebase.firestore.FieldValue.serverTimestamp(),
+        bp, weight, glucose,
+        progressNote: entryText,
+        deptEntries: [deptEntry],
+        prescription, prescriptionItems, plan, photoURL, pdfURL,
+        dispenseMode: rxMode,
+        createdBy: { name: currentUser.name, dept: deptLabel }
+      });
+      if(wRefForSession){
+        await wRefForSession.update({ visitId: newVisitRef.id }).catch(()=>{});
+      }
+    }
 
     if(activeWaitingId){
       // 여러 진료과가 이어서 진료하는 경우: 처방을 바로 약국에 보내지 않고 접수 세션에 누적 저장.
@@ -2019,15 +2063,19 @@ async function saveVisit(silent){
   }
 }
 
+let isCompletingVisit = false;
 async function completeVisit(){
-  if(hasUnsavedVisitContent()){
-    try{
-      await saveVisit(true);
-    }catch(err){
-      return; // 저장 실패 시 완료 처리 중단 (기록 유실 방지)
+  if(isCompletingVisit) return; // 중복 클릭으로 인한 진료 기록 중복 생성 방지
+  isCompletingVisit = true;
+  try{
+    if(hasUnsavedVisitContent()){
+      try{
+        await saveVisit(true);
+      }catch(err){
+        return; // 저장 실패 시 완료 처리 중단 (기록 유실 방지)
+      }
     }
-  }
-  if(activeWaitingId){
+    if(activeWaitingId){
     try{
       const wRef = db.collection('waitingList').doc(activeWaitingId);
       const wDoc = await wRef.get();
@@ -2068,6 +2116,9 @@ async function completeVisit(){
     }
   }
   setScreen('queue');
+  }finally{
+    isCompletingVisit = false;
+  }
 }
 
 async function deletePatient(){
@@ -2550,7 +2601,7 @@ function toggleStatsVisitList(filter){
       <div class="queue-card" onclick="closeStatsAndOpenChart('${v.patientId}')">
         <div class="qc-info">
           <div class="name">${v.name} ${v.isNew?'<span class="pharm-status">신환</span>':''}</div>
-          <div class="meta">${v.siteName} · ${fmtDate(v.date)}</div>
+          <div class="meta">${v.siteName} · ${fmtDate(v.date)}${v.deptCount>1?` · 진료과 ${v.deptCount}건 (${v.deptNames})`:''}</div>
         </div>
         <div style="text-align:right;">
           <div class="qc-regno mono">${v.regNo}</div>
@@ -2679,7 +2730,12 @@ async function loadStats(){
       if(statsSiteFilter!=='all' && pat.siteId !== statsSiteFilter) return false;
       return true;
     });
-    const totalVisitsInRange = realVisitDocs.length;
+    const sessionCount = realVisitDocs.length; // 접수 건수 (한 번의 접수 = 여러 과가 봤어도 문서 1건)
+    // 진료 건수: 한 세션 안에 여러 진료과가 이어서 본 경우 그 과 수만큼 센다 (예: 내과+안과 1명 = 접수 1건, 진료 2건)
+    const deptVisitCount = realVisitDocs.reduce((sum, v)=>{
+      const de = v.data().deptEntries;
+      return sum + (Array.isArray(de) && de.length ? de.length : 1);
+    }, 0);
 
     // 신환 판정: "선택한 기간에 등록됐는지"가 아니라 "이 방문이 그 환자의 평생 첫 실제 진료인지"로 판단.
     // 이렇게 해야 '오늘/이번 주/이번 달' 중 무엇을 눌러도 같은 방문 기록이 항상 같은 결과(신환 또는 재진)로 나옴.
@@ -2718,9 +2774,12 @@ async function loadStats(){
       const patientId = v.ref.parent.parent.id;
       const p = patientMap[patientId] || {};
       const isNew = firstRealVisitIdMap[patientId] !== undefined && v.id === firstRealVisitIdMap[patientId];
+      const deptEntries = Array.isArray(v.data().deptEntries) ? v.data().deptEntries : [];
       return {
         patientId, name: p.name||'(알 수 없음)', regNo: p.regNo||'-', siteName: p.siteName||'-',
         date: v.data().date, progressNote: v.data().progressNote||'', isNew,
+        deptCount: deptEntries.length || 1,
+        deptNames: deptEntries.length ? deptEntries.map(e=>e.deptName).join(', ') : '',
         currentStatus: currentStatusLabel(patientId)
       };
     }).sort((a,b)=>{
@@ -2729,9 +2788,9 @@ async function loadStats(){
       return tb - ta;
     });
 
-    // 위 숫자(신환/재진)는 반드시 명단과 같은 기준(방문 건 단위)으로 계산 - 아래에서 세는 방식과 통일
+    // 신환/재진은 "접수 건수" 기준(한 세션은 신환이든 재진이든 하나로만 집계)
     const newInRange = statsVisitList.filter(v=>v.isNew).length;
-    const returnVisitsInRange = totalVisitsInRange - newInRange;
+    const returnVisitsInRange = sessionCount - newInRange;
 
 
 
@@ -2753,13 +2812,17 @@ async function loadStats(){
     const siteLabel = statsSiteFilter==='all' ? '전체 사이트' : (sites.find(s=>s.id===statsSiteFilter)?.name || '전체 사이트');
 
     body.innerHTML = `
-      <div class="note">선택 사이트: ${siteLabel} · 선택 기간: ${rangeLabel} (신환·진료건수는 이 기간 기준, 사이트/연령/만성질환 표는 전체 누적 기준)</div>
+      <div class="note">선택 사이트: ${siteLabel} · 선택 기간: ${rangeLabel} (접수·신환·재진·진료건수는 이 기간 기준, 사이트/연령/만성질환 표는 전체 누적 기준)</div>
       <div class="card" style="margin-bottom:16px;">
         <h3>기간 내 진료 현황 (숫자를 눌러서 명단 보기)</h3>
-        <div class="grid2" style="gap:10px;">
+        <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:10px;">
           <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px; cursor:pointer;" onclick="toggleStatsVisitList('all')">
-            <div style="font-size:26px; font-weight:700; font-family:ui-monospace,monospace;">${totalVisitsInRange}</div>
-            <div style="font-size:12px; color:var(--ink-soft);">전체 진료</div>
+            <div style="font-size:26px; font-weight:700; font-family:ui-monospace,monospace;">${sessionCount}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">접수 건수</div>
+          </div>
+          <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px;">
+            <div style="font-size:26px; font-weight:700; font-family:ui-monospace,monospace;">${deptVisitCount}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">진료 건수 (진료과 합계)</div>
           </div>
           <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px; cursor:pointer;" onclick="toggleStatsVisitList('new')">
             <div style="font-size:26px; font-weight:700; font-family:ui-monospace,monospace;">${newInRange}</div>
@@ -2770,6 +2833,7 @@ async function loadStats(){
             <div style="font-size:12px; color:var(--ink-soft);">재진</div>
           </div>
         </div>
+        <div class="note" style="margin-top:8px;">한 분이 여러 진료과를 거치면 접수 건수는 1건, 진료 건수는 거친 과 수만큼(예: 2과 → 2건) 집계됩니다.</div>
       </div>
       <div class="grid2" style="margin-bottom:16px;">
         <div class="card"><h3>${siteLabel} 누적 등록</h3>
