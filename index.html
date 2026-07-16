@@ -380,7 +380,7 @@ window.addEventListener('popstate', function(e){
   suppressHistoryPush = true;
   try{
     if(e.state.type === 'chart'){
-      openChart(e.state.patientId, e.state.waitingId);
+      openChart(e.state.patientId, e.state.waitingId, e.state.deptIndex);
     } else if(e.state.type === 'screen'){
       screenName = e.state.screen;
       renderNav();
@@ -551,8 +551,9 @@ function renderNav(){
       <div class="nav-item ${screenName==='doneList'?'active':''}" onclick="setScreen('doneList')">✅ 진료완료 리스트</div>
       <div class="nav-item ${screenName==='reg'?'active':''}" onclick="setScreen('reg')">➕ ${t('navReg')}</div>
       <div class="nav-item ${screenName==='search'?'active':''}" onclick="setScreen('search')">🔍 ${t('navSearch')}</div>
-      <div class="nav-item ${screenName==='calendar'?'active':''}" onclick="setScreen('calendar')">📅 ${t('navCalendar')}</div>
+      <div class="nav-item ${screenName==='lab'?'active':''}" onclick="setScreen('lab')">🧪 검사실</div>
       <div class="nav-item ${screenName==='pharmacy'?'active':''}" onclick="setScreen('pharmacy')">💊 ${t('navPharmacy')}</div>
+      <div class="nav-item ${screenName==='calendar'?'active':''}" onclick="setScreen('calendar')">📅 ${t('navCalendar')}</div>
       <div class="nav-item ${screenName==='stats'?'active':''}" onclick="setScreen('stats')">📊 ${t('navStats')}</div>
       <div class="nav-item ${screenName==='backup'?'active':''}" onclick="setScreen('backup')">💾 데이터 백업</div>
     `;
@@ -583,6 +584,7 @@ function renderMain(){
   else if(screenName==='sites') main.innerHTML = sitesScreenHTML();
   else if(screenName==='calendar'){ main.innerHTML = calendarScreenHTML(); loadAppointments(); }
   else if(screenName==='pharmacy') renderPharmacy();
+  else if(screenName==='lab') renderLab();
   else if(screenName==='stats'){ main.innerHTML = statsScreenHTML(); loadStats(); }
   else if(screenName==='backup') main.innerHTML = backupScreenHTML();
 }
@@ -598,6 +600,19 @@ function getTodayRange(){
     startTs: firebase.firestore.Timestamp.fromDate(start),
     endTs: firebase.firestore.Timestamp.fromDate(end)
   };
+}
+
+function deptButtonLabel(dep){
+  switch(dep.status){
+    case 'done': return `${dep.name} 진료완료`;
+    case 'inProgress': return `${dep.name} 진료중`;
+    case 'examPending': return `${dep.name} 검사대기중`;
+    case 'examDone': return `${dep.name} 검사완료 대기중`;
+    default: return `${dep.name} 대기중`;
+  }
+}
+function deptButtonClickable(dep){
+  return dep.status !== 'done' && dep.status !== 'examPending';
 }
 
 function renderQueue(){
@@ -616,15 +631,23 @@ function renderQueue(){
       list.innerHTML = snap.docs.map(d=>{
         const w = d.data();
         const chronicBadges = (w.chronicTags||[]).map(tag=>`<span class="badge-chronic">${tag}</span>`).join('');
-        const statusBadge = w.status==='inProgress' ? '<span class="pharm-status">진료중</span>' : '';
+        const depts = (w.departments && w.departments.length) ? w.departments : [{name:'일반진료', status:'waiting'}];
+        const deptButtons = depts.map((dep, idx)=>{
+          const label = deptButtonLabel(dep);
+          if(deptButtonClickable(dep)){
+            return `<button class="btn small ${dep.status==='waiting'?'outline':''}" onclick="event.stopPropagation(); openChart('${w.patientId}','${d.id}',${idx})">${label}</button>`;
+          }
+          return `<span class="pharm-status" style="padding:6px 10px;">${label}</span>`;
+        }).join(' ');
         return `
-          <div class="queue-card" onclick="openChart('${w.patientId}','${d.id}')">
+          <div class="queue-card" style="flex-wrap:wrap; cursor:default;">
             <div class="qc-info">
-              <div class="name">${w.name}${chronicBadges}${statusBadge}</div>
+              <div class="name">${w.name}${chronicBadges}</div>
               <div class="meta">${w.gender||''} · ${ageLabel(w.age)} · ${w.siteName}</div>
             </div>
             <div class="qc-regno mono">${w.regNo}</div>
-            <button class="btn small outline" style="color:var(--rust); border-color:var(--rust);" onclick="event.stopPropagation(); removeFromQueue('${d.id}')">삭제</button>
+            <button class="btn small outline" style="color:var(--rust); border-color:var(--rust);" onclick="removeFromQueue('${d.id}')">삭제</button>
+            <div style="display:flex; gap:6px; flex-wrap:wrap; width:100%; margin-top:8px;">${deptButtons}</div>
           </div>`;
       }).join('');
     }, err=>{
@@ -633,14 +656,29 @@ function renderQueue(){
     });
 }
 
+// 방문 문서가 "실제 진료 기록"인지 판정하는 공용 함수.
+// 등록 시 자동 생성되는 '(초진 등록)' 스텁만 걸러내고, 그 외에는 progressNote(글 형태의 소견)가
+// 비어 있어도 BP/체중/혈당/처방/plan/PDF 등 임상 내용이 하나라도 있으면 "실제 진료"로 인정한다.
+// (예전 로직은 progressNote가 비어있으면 무조건 제외했는데, 이 때문에 바쁜 현장에서
+//  소견을 따로 타이핑하지 않고 처방/BP만 기록한 실제 진료가 통계·리스트에서 누락되는 문제가 있었음)
+function isRealVisitDoc(d){
+  const note = (d.progressNote||'').toString().trim();
+  if(note === '(초진 등록)') return false;
+  const hasBp = (d.bp||'').toString().trim();
+  const hasWeight = (d.weight||'').toString().trim();
+  const hasGlucose = (d.glucose||'').toString().trim();
+  const hasPlan = (d.plan||'').toString().trim();
+  const hasRxItems = Array.isArray(d.prescriptionItems) && d.prescriptionItems.length>0;
+  const hasRxText = (d.prescription||'').toString().trim();
+  const hasPdf = !!d.pdfURL;
+  return !!(note || hasBp || hasWeight || hasGlucose || hasPlan || hasRxItems || hasRxText || hasPdf);
+}
+
 async function getTodayVisitedPatients(){
   const {startTs, endTs} = getTodayRange();
   const visitsSnap = await db.collectionGroup('visits')
     .where('date','>=',startTs).where('date','<=',endTs).get();
-  const realDocs = visitsSnap.docs.filter(v=>{
-    const note = (v.data().progressNote||'').trim();
-    return note && note !== '(초진 등록)';
-  });
+  const realDocs = visitsSnap.docs.filter(v=> isRealVisitDoc(v.data()));
   const uniquePatientIds = [...new Set(realDocs.map(v=>v.ref.parent.parent.id))];
   const patientDocs = await Promise.all(uniquePatientIds.map(pid=>db.collection('patients').doc(pid).get()));
   const patientMap = {};
@@ -699,7 +737,71 @@ async function removeFromQueue(waitingId){
 /* =========================================================
    6. 신규 환자 등록
    ========================================================= */
+const DEPT_OPTIONS = ['내과','소아과','산부인과','피부과','치과','정형외과','안과','이비인후과','정신과'];
+let deptPickerState = {}; // { uid: ['내과','소아과'] }
+
+function deptPickerHTML(uid, label){
+  if(!deptPickerState[uid]) deptPickerState[uid] = [];
+  const options = DEPT_OPTIONS.map(d=>`<option value="${d}">${d}</option>`).join('') + `<option value="__custom__">기타 (직접 입력)</option>`;
+  return `
+    <div class="field" style="margin-top:6px;">
+      <label>${label || '진료과'}</label>
+      <div id="dept-chips-${uid}" style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px;">${deptChipsHTML(uid)}</div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <select id="dept-select-${uid}" style="flex:1; min-width:140px;" onchange="onDeptSelectChange('${uid}')">${options}</select>
+        <input id="dept-custom-${uid}" placeholder="진료과명 입력" style="display:none; flex:1; min-width:140px;">
+        <button type="button" class="btn small outline" onclick="addDeptToPicker('${uid}')">+ 진료과 추가</button>
+      </div>
+    </div>
+  `;
+}
+function deptChipsHTML(uid){
+  const list = deptPickerState[uid]||[];
+  if(list.length===0) return '<span style="font-size:12.5px; color:var(--ink-soft);">추가된 진료과 없음 (없으면 "일반진료"로 접수됩니다)</span>';
+  return list.map((d,i)=>`<span class="rx-chip" style="cursor:default;">${d} <span style="cursor:pointer; margin-left:4px;" onclick="removeDeptFromPicker('${uid}',${i})">✕</span></span>`).join('');
+}
+function onDeptSelectChange(uid){
+  const sel = document.getElementById(`dept-select-${uid}`);
+  const custom = document.getElementById(`dept-custom-${uid}`);
+  if(!sel||!custom) return;
+  custom.style.display = sel.value === '__custom__' ? 'inline-block' : 'none';
+}
+function addDeptToPicker(uid){
+  const sel = document.getElementById(`dept-select-${uid}`);
+  const custom = document.getElementById(`dept-custom-${uid}`);
+  if(!sel) return;
+  let val = sel.value === '__custom__' ? (custom.value||'').trim() : sel.value;
+  if(!val){ alert('진료과명을 입력해주세요.'); return; }
+  if(!deptPickerState[uid]) deptPickerState[uid] = [];
+  if(deptPickerState[uid].includes(val)){ alert('이미 추가된 진료과입니다.'); return; }
+  deptPickerState[uid].push(val);
+  if(custom) custom.value = '';
+  const chipsEl = document.getElementById(`dept-chips-${uid}`);
+  if(chipsEl) chipsEl.innerHTML = deptChipsHTML(uid);
+}
+function removeDeptFromPicker(uid, idx){
+  deptPickerState[uid].splice(idx,1);
+  const chipsEl = document.getElementById(`dept-chips-${uid}`);
+  if(chipsEl) chipsEl.innerHTML = deptChipsHTML(uid);
+}
+function getPickedDepts(uid){
+  const list = (deptPickerState[uid]||[]).slice();
+  return list.length ? list : ['일반진료'];
+}
+function resetDeptPicker(uid){
+  deptPickerState[uid] = [];
+}
+function makeDepartments(names){
+  return names.map(n=>({name:n, status:'waiting', doctorName:null}));
+}
+function computeOverallStatus(depts){
+  if(!depts || depts.length===0) return 'waiting';
+  if(depts.every(d=>d.status==='done')) return 'done';
+  if(depts.some(d=>d.status==='inProgress' || d.status==='examPending' || d.status==='examDone' || d.status==='done')) return 'inProgress';
+  return 'waiting';
+}
 function regScreenHTML(){
+  resetDeptPicker('reg');
   if(sites.length===0){
     return `
       <div class="topbar"><h2>${t('regTitle')}</h2></div>
@@ -718,6 +820,7 @@ function regScreenHTML(){
         <div class="field"><label>${t('phone')}</label><input id="r-phone"></div>
         <div class="field"><label>${t('site')}</label><select id="r-site" onchange="updateRegNoPreview()">${siteOptions}</select></div>
       </div>
+      ${deptPickerHTML('reg')}
       <div class="field" style="margin-top:6px;">
         <label>얼굴 사진 (신원 확인용)</label>
         <input type="file" id="r-photo" accept="image/*" capture="user">
@@ -849,11 +952,14 @@ async function submitRegistration(){
     if(history.hypertension) chronicTags.push('고혈압');
     if(history.diabetes) chronicTags.push('당뇨');
 
+    const departments = makeDepartments(getPickedDepts('reg'));
     await db.collection('waitingList').add({
       patientId: patientRef.id, siteId, siteName: site.name, regNo, name, gender, age,
-      chronicTags, status:'waiting', checkinAt: firebase.firestore.FieldValue.serverTimestamp()
+      chronicTags, status:'waiting', departments, sessionRx: [],
+      checkinAt: firebase.firestore.FieldValue.serverTimestamp()
     });
 
+    resetDeptPicker('reg');
     alert(`등록 완료: ${regNo}`);
     setScreen('queue');
   }catch(err){
@@ -915,16 +1021,30 @@ async function doSearch(){
 
   results.innerHTML = matched.map(p=>{
     return `
-      <div class="queue-card">
+      <div class="queue-card" style="flex-wrap:wrap;">
         <div class="qc-info">
           <div class="name">${p.name}</div>
           <div class="meta">${p.gender||''} · ${ageLabel(p.age)} · ${p.siteName}</div>
         </div>
         <div class="qc-regno mono">${p.regNo}</div>
         ${currentUser.role==='doctor' ? `<button class="btn small outline" onclick="openChart('${p.id}', null)">차트 보기</button>` : ''}
-        <button class="btn small" onclick="checkInExisting('${p.id}')">${t('checkIn')}</button>
+        <button class="btn small" onclick="showCheckinDeptPicker('${p.id}')">${t('checkIn')}</button>
+        <div id="checkin-panel-${p.id}" style="display:none; width:100%; margin-top:10px; padding-top:10px; border-top:1px solid var(--line);"></div>
       </div>`;
   }).join('');
+}
+
+function showCheckinDeptPicker(patientId){
+  resetDeptPicker('checkin-'+patientId);
+  const container = document.getElementById(`checkin-panel-${patientId}`);
+  if(!container) return;
+  const isOpen = container.style.display !== 'none';
+  if(isOpen){ container.style.display = 'none'; return; }
+  container.style.display = 'block';
+  container.innerHTML = `
+    ${deptPickerHTML('checkin-'+patientId)}
+    <button class="btn small" onclick="checkInExisting('${patientId}')">접수 확정</button>
+  `;
 }
 
 async function checkInExisting(patientId){
@@ -933,10 +1053,13 @@ async function checkInExisting(patientId){
   const chronicTags = [];
   if(p.history?.hypertension) chronicTags.push('고혈압');
   if(p.history?.diabetes) chronicTags.push('당뇨');
+  const departments = makeDepartments(getPickedDepts('checkin-'+patientId));
   await db.collection('waitingList').add({
     patientId, siteId:p.siteId, siteName:p.siteName, regNo:p.regNo, name:p.name, gender:p.gender, age:p.age,
-    chronicTags, status:'waiting', checkinAt: firebase.firestore.FieldValue.serverTimestamp()
+    chronicTags, status:'waiting', departments, sessionRx: [],
+    checkinAt: firebase.firestore.FieldValue.serverTimestamp()
   });
+  resetDeptPicker('checkin-'+patientId);
   alert('대기 리스트에 등록되었습니다.');
   setScreen('queue');
 }
@@ -947,7 +1070,12 @@ async function checkInExisting(patientId){
 let activePatientId = null;
 let activeWaitingId = null;
 let activePatientData = null;
+let activeDeptIndex = null;
+let activeDeptName = null;
+let activeSessionRx = [];
+let activeExamOrder = null; // 현재 진료과의 진행중/완료된 검사 주문 {id, items, status} 또는 null
 let presets = [];
+let examPresetItems = [];
 
 db.collection('presets').orderBy('createdAt','desc').onSnapshot(snap=>{
   presets = snap.docs.map(d=>({id:d.id, ...d.data()}));
@@ -955,18 +1083,43 @@ db.collection('presets').orderBy('createdAt','desc').onSnapshot(snap=>{
   if(holder) holder.innerHTML = presetChipsHTML();
 });
 
+db.collection('examPresetItems').orderBy('name','asc').onSnapshot(snap=>{
+  examPresetItems = snap.docs.map(d=>({id:d.id, ...d.data()}));
+  const holder = document.getElementById('exam-preset-holder');
+  if(holder) holder.innerHTML = examPresetChipsHTML();
+});
+
 function presetChipsHTML(){
-  return presets.map(p=>`<div class="rx-chip" onclick="applyPreset('${p.id}')">📋 ${p.name}</div>`).join('')
+  return presets.map(p=>`
+    <span class="rx-chip" style="display:inline-flex; align-items:center; gap:5px;">
+      <span style="cursor:pointer;" onclick="applyPreset('${p.id}')">📋 ${p.name}</span>
+      <span style="cursor:pointer; opacity:.55;" title="이름 변경" onclick="event.stopPropagation(); renamePreset('${p.id}')">✎</span>
+    </span>`).join('')
     + `<div class="rx-chip" onclick="saveCurrentAsPreset()">+ 새 세트 저장</div>`;
+}
+function removeEmptyRxRows(){
+  const tbody = document.getElementById('rx-table-body');
+  if(!tbody) return;
+  tbody.querySelectorAll('tr').forEach(tr=>{
+    const idx = tr.id.replace('rx-row-','');
+    const drug = document.getElementById(`rx-drug-${idx}`)?.value.trim();
+    if(!drug) tr.remove();
+  });
 }
 function applyPreset(id){
   const p = presets.find(x=>x.id===id);
   if(!p) return;
-  const tbody = document.getElementById('rx-table-body');
-  if(tbody) tbody.innerHTML = '';
-  rxRowCount = 0;
-  (p.items||[]).forEach(item => addRxRow(item));
-  if(!p.items || p.items.length===0) addRxRow();
+  removeEmptyRxRows(); // 빈 줄은 정리하고, 이미 담긴 처방은 그대로 둔 채 이어서 추가
+  (p.items||[]).forEach(item => addRxRow(item, true));
+}
+async function renamePreset(id){
+  const p = presets.find(x=>x.id===id);
+  if(!p) return;
+  const name = prompt('처방 세트의 새 이름을 입력하세요', p.name);
+  if(!name || name===p.name) return;
+  try{
+    await db.collection('presets').doc(id).update({name});
+  }catch(err){ alert('이름 변경 실패: ' + err.message); }
 }
 async function saveCurrentAsPreset(){
   const items = collectRxRows();
@@ -992,20 +1145,60 @@ function repeatLastPrescription(){
   alert('반복할 이전 처방 기록이 없습니다.');
 }
 
-async function openChart(patientId, waitingId){
+async function openChart(patientId, waitingId, deptIndex){
   activePatientId = patientId;
   activeWaitingId = waitingId;
+  activeDeptIndex = (deptIndex===undefined) ? null : deptIndex;
+  activeDeptName = null;
+  activeSessionRx = [];
+  activeExamOrder = null;
   screenName = 'chart';
   renderNav();
   const main = document.getElementById('main');
   main.innerHTML = `<div class="empty-note">불러오는 중...</div>`;
 
+  let referralMessageToShow = null;
+
   if(waitingId){
-    db.collection('waitingList').doc(waitingId).get().then(wd=>{
-      if(wd.exists && wd.data().status === 'waiting'){
-        wd.ref.update({status:'inProgress'}).catch(()=>{});
+    try{
+      const wDoc = await db.collection('waitingList').doc(waitingId).get();
+      if(wDoc.exists){
+        const wdata = wDoc.data();
+        activeSessionRx = wdata.sessionRx || [];
+        if(wdata.departments && wdata.departments.length && activeDeptIndex !== null && wdata.departments[activeDeptIndex]){
+          const dept = wdata.departments[activeDeptIndex];
+          activeDeptName = dept.name;
+          if(dept.referralMessage && !dept.referralMessageShown){
+            referralMessageToShow = dept.referralMessage;
+          }
+          const updatedDept = {...dept};
+          let needsWrite = false;
+          if(dept.status === 'waiting' || dept.status === 'examDone'){
+            updatedDept.status = 'inProgress';
+            updatedDept.doctorName = currentUser.name;
+            needsWrite = true;
+          }
+          if(referralMessageToShow){
+            updatedDept.referralMessageShown = true;
+            needsWrite = true;
+          }
+          if(needsWrite){
+            const depts = wdata.departments.slice();
+            depts[activeDeptIndex] = updatedDept;
+            const overall = computeOverallStatus(depts);
+            await wDoc.ref.update({departments: depts, status: overall});
+          }
+          if(dept.examOrderId){
+            try{
+              const exDoc = await db.collection('labQueue').doc(dept.examOrderId).get();
+              if(exDoc.exists) activeExamOrder = {id: exDoc.id, ...exDoc.data()};
+            }catch(e){}
+          }
+        } else if(wdata.status === 'waiting'){
+          await wDoc.ref.update({status:'inProgress'}).catch(()=>{});
+        }
       }
-    }).catch(()=>{});
+    }catch(e){ console.error(e); }
   }
 
   const pDoc = await db.collection('patients').doc(patientId).get();
@@ -1018,16 +1211,194 @@ async function openChart(patientId, waitingId){
 
   main.innerHTML = chartScreenHTML(patient, visits);
   rxRowCount = 0;
-  addRxRow(null, true);
+  if(activeSessionRx && activeSessionRx.length){
+    activeSessionRx.forEach(item => addRxRow(item, true));
+  } else {
+    addRxRow(null, true);
+  }
   const noteEl = document.getElementById('v-note');
   if(noteEl) noteEl.focus();
 
+  if(referralMessageToShow){
+    const deptNameForMsg = activeDeptName;
+    setTimeout(()=>{ alert(`📋 진료 의뢰 메세지 (${deptNameForMsg}):\n\n${referralMessageToShow}`); }, 300);
+  }
+
   if(!suppressHistoryPush){
-    history.pushState({type:'chart', patientId, waitingId}, '', '#chart');
+    history.pushState({type:'chart', patientId, waitingId, deptIndex: activeDeptIndex}, '', '#chart');
   }
 }
 
 let activeVisitsCache = [];
+
+/* ---- 사이드 패널(진료의뢰/검사실 등에서 공용으로 사용하는 슬라이드 패널) ---- */
+function openSidePanel(html){
+  let panel = document.getElementById('side-modal');
+  if(!panel){
+    panel = document.createElement('div');
+    panel.id = 'side-modal';
+    panel.className = 'history-panel';
+    document.body.appendChild(panel);
+  }
+  panel.innerHTML = html;
+  panel.classList.add('open');
+}
+function closeSidePanel(){
+  const panel = document.getElementById('side-modal');
+  if(panel) panel.classList.remove('open');
+}
+
+/* ---- 진료 의뢰 (다른 진료과에 접수 추가) ---- */
+function openReferralModal(){
+  if(!activeWaitingId){ alert('접수(대기) 정보가 없는 환자는 진료 의뢰를 보낼 수 없습니다.'); return; }
+  resetDeptPicker('referral');
+  openSidePanel(`
+    <div class="history-panel-head">
+      <span>다른 진료과에 진료 의뢰</span>
+      <span style="cursor:pointer;" onclick="closeSidePanel()">✕ 닫기</span>
+    </div>
+    <div class="history-panel-body">
+      ${deptPickerHTML('referral', '의뢰할 진료과')}
+      <div class="field"><label>메세지 (선택 — 비워도 됩니다)</label><textarea id="referral-msg" rows="3" placeholder="예: 흉통 있어 심전도 확인 부탁드립니다"></textarea></div>
+      <button class="btn small" onclick="submitReferral()">진료 의뢰 보내기</button>
+    </div>
+  `);
+}
+async function submitReferral(){
+  const list = (deptPickerState['referral']||[]).slice();
+  if(list.length===0){ alert('의뢰할 진료과를 선택해주세요.'); return; }
+  const message = (document.getElementById('referral-msg')?.value || '').trim();
+  try{
+    const wRef = db.collection('waitingList').doc(activeWaitingId);
+    const wDoc = await wRef.get();
+    if(!wDoc.exists){ alert('접수 정보를 찾을 수 없습니다.'); return; }
+    const wdata = wDoc.data();
+    const depts = (wdata.departments && wdata.departments.length) ? wdata.departments.slice() : [{name:'일반진료', status:'done'}];
+    list.forEach(deptName=>{
+      depts.push({name: deptName, status:'waiting', doctorName:null, referredBy: currentUser.name, referralMessage: message || null, referralMessageShown:false});
+    });
+    const overall = computeOverallStatus(depts);
+    await wRef.update({departments: depts, status: overall});
+    resetDeptPicker('referral');
+    closeSidePanel();
+    alert(`${list.join(', ')}(으)로 진료 의뢰를 보냈습니다. 대기 리스트에 새 버튼이 생성됩니다.`);
+  }catch(err){
+    alert('진료 의뢰 실패: ' + err.message);
+  }
+}
+
+/* ---- 검사 처방 (진료 차트 내) ---- */
+let examRowCount = 0;
+function examSectionHTML(){
+  if(!activeWaitingId || activeDeptIndex === null){
+    return `<div class="field"><label>검사 처방</label><div class="note" style="margin:0;">접수(대기 리스트)를 통해 열린 진료과 화면에서만 검사를 전달할 수 있습니다.</div></div>`;
+  }
+  const items = activeExamOrder ? (activeExamOrder.items||[]) : [];
+  const sentRows = items.map((it, i)=>`
+    <div class="grid2" style="align-items:end; margin-bottom:6px;">
+      <div class="field" style="margin-bottom:0;"><label>${i===0?'전달된 검사 항목':''}</label><input value="${it.name||''}" disabled style="background:var(--paper); border:1px solid var(--line); border-radius:4px; padding:5px; width:100%;"></div>
+      <div class="field" style="margin-bottom:0;"><label>${i===0?'결과':''}</label><input id="exam-result-${i}" value="${(it.result||'').replace(/"/g,'&quot;')}" placeholder="결과 입력" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:5px;" onchange="updateExamResult(${i}, this.value)"></div>
+    </div>
+  `).join('');
+  return `
+    <div class="field">
+      <label>검사 처방</label>
+      <div class="rx-preset" id="exam-preset-holder">${examPresetChipsHTML()}</div>
+      <div id="exam-new-rows"></div>
+      <button type="button" class="btn small outline" onclick="addExamRow()">+ 검사 항목 추가</button>
+      ${items.length ? `<div style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--line);"><div style="font-size:12px; color:var(--ink-soft); margin-bottom:6px;">검사실로 이미 전달된 항목 (결과는 검사실에서도 입력되며 여기서도 확인·수정할 수 있습니다)</div>${sentRows}</div>` : ''}
+      <button type="button" class="btn small" style="margin-top:10px;" onclick="sendExamOrder()">🔬 검사 처방 전달</button>
+    </div>
+  `;
+}
+function examPresetChipsHTML(){
+  return examPresetItems.map(p=>`<div class="rx-chip" onclick="addExamRow('${(p.name||'').replace(/'/g,"\\'")}')">${p.name}</div>`).join('')
+    + `<div class="rx-chip" onclick="saveExamPresetFromPrompt()">+ 새 검사 항목 저장</div>`;
+}
+async function saveExamPresetFromPrompt(){
+  const name = prompt('저장할 검사 항목 이름을 입력하세요 (예: EKG, HbA1c)');
+  if(!name) return;
+  try{
+    await db.collection('examPresetItems').add({name, createdAt: firebase.firestore.FieldValue.serverTimestamp()});
+    addExamRow(name);
+  }catch(err){ alert('저장 실패: ' + err.message); }
+}
+function examDraftRowHTML(idx, name){
+  return `
+    <div class="grid2" id="exam-draft-row-${idx}" style="align-items:end; margin-bottom:6px;">
+      <div class="field" style="margin-bottom:0;"><label>검사 항목</label><input id="exam-draft-name-${idx}" value="${name||''}" placeholder="예: EKG, HbA1c" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:5px;"></div>
+      <div class="field" style="margin-bottom:0; display:flex; align-items:end; gap:6px;">
+        <span style="cursor:pointer; color:var(--rust); padding:6px;" onclick="removeExamDraftRow(${idx})">✕ 삭제</span>
+      </div>
+    </div>`;
+}
+function addExamRow(name){
+  const idx = examRowCount++;
+  const holder = document.getElementById('exam-new-rows');
+  if(!holder) return;
+  holder.insertAdjacentHTML('beforeend', examDraftRowHTML(idx, name));
+}
+function removeExamDraftRow(idx){
+  const row = document.getElementById(`exam-draft-row-${idx}`);
+  if(row) row.remove();
+}
+function collectExamDraft(){
+  const holder = document.getElementById('exam-new-rows');
+  if(!holder) return [];
+  const items = [];
+  holder.querySelectorAll('[id^="exam-draft-row-"]').forEach(row=>{
+    const idx = row.id.replace('exam-draft-row-','');
+    const name = document.getElementById(`exam-draft-name-${idx}`)?.value.trim();
+    if(name) items.push({name, result:''});
+  });
+  return items;
+}
+async function updateExamResult(idx, value){
+  if(!activeExamOrder) return;
+  const items = (activeExamOrder.items||[]).slice();
+  if(!items[idx]) return;
+  items[idx] = {...items[idx], result:value};
+  activeExamOrder.items = items;
+  try{
+    await db.collection('labQueue').doc(activeExamOrder.id).update({items});
+  }catch(err){ console.error(err); }
+}
+async function sendExamOrder(){
+  if(!activeWaitingId || activeDeptIndex===null){ alert('접수를 통해 열린 진료과에서만 검사를 전달할 수 있습니다.'); return; }
+  const newItems = collectExamDraft();
+  if(newItems.length===0 && !activeExamOrder){ alert('검사 항목을 1개 이상 입력해주세요.'); return; }
+  try{
+    const wRef = db.collection('waitingList').doc(activeWaitingId);
+    const wDoc = await wRef.get();
+    if(!wDoc.exists) return;
+    const wdata = wDoc.data();
+    const depts = (wdata.departments||[]).slice();
+    const dept = depts[activeDeptIndex];
+    if(!dept){ alert('진료과 정보를 찾을 수 없습니다.'); return; }
+    let examOrderId = dept.examOrderId;
+    if(examOrderId && activeExamOrder){
+      const merged = [...(activeExamOrder.items||[]), ...newItems];
+      await db.collection('labQueue').doc(examOrderId).update({items: merged, status:'pending'});
+    } else {
+      const newDoc = await db.collection('labQueue').add({
+        waitingId: activeWaitingId, deptIndex: activeDeptIndex, deptName: dept.name,
+        patientId: activePatientId, patientName: activePatientData.name, regNo: activePatientData.regNo, siteName: activePatientData.siteName,
+        items: newItems, status:'pending', orderedBy: currentUser.name,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      examOrderId = newDoc.id;
+    }
+    depts[activeDeptIndex] = {...dept, status:'examPending', examOrderId};
+    const overall = computeOverallStatus(depts);
+    await wRef.update({departments: depts, status: overall});
+    alert('검사실로 전달되었습니다. 이 환자는 검사가 끝나면 대기 리스트에 "검사완료 대기중"으로 다시 나타납니다.');
+    setScreen('queue');
+  }catch(err){
+    alert('검사 전달 실패: ' + err.message);
+  }
+}
+
+
 let rxRowCount = 0;
 
 function backupScreenHTML(){
@@ -1279,7 +1650,7 @@ function chartScreenHTML(patient, visits){
   const latest = visits[visits.length-1] || {};
   const showFlowsheet = h.hypertension || h.diabetes;
   const flowRows = visits.filter(v=>v.bp || v.glucose).slice(-10).map(v=>`
-    <tr><td>${fmtDate(v.date)}</td><td>${v.bp||'-'}</td><td>${v.glucose||'-'}</td><td>${v.weight||'-'}</td><td>${(v.progressNote||'').slice(0,30)}</td></tr>
+    <tr><td>${fmtDate(v.date)}</td><td>${v.bp||'-'}</td><td>${v.glucose||'-'}</td><td>${v.weight||'-'}</td><td><input value="${(v.flowNote||'').replace(/"/g,'&quot;')}" placeholder="비고 입력" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:4px;" onchange="saveFlowNote('${v.id}', this.value)"></td></tr>
   `).join('');
 
   return `
@@ -1304,6 +1675,7 @@ function chartScreenHTML(patient, visits){
       ${patient.photoURL ? `<img src="${patient.photoURL}" style="width:150px; height:150px; border-radius:10px; object-fit:cover; margin:0 12px;">` : ''}
       <div style="display:flex; flex-direction:column; gap:6px;">
         <button class="btn small outline" onclick="completeVisit()">진료 완료 처리</button>
+        ${activeWaitingId ? `<button class="btn small outline" onclick="openReferralModal()">🔀 진료 의뢰</button>` : ''}
         <button class="btn small outline" style="color:var(--rust); border-color:var(--rust);" onclick="deletePatient()">환자 삭제</button>
       </div>
     </div>
@@ -1346,6 +1718,7 @@ function chartScreenHTML(patient, visits){
         <div class="field"><label>공복혈당 (FBS, mg/dL)</label><input id="v-glucose" type="number" placeholder="예: 110"></div>
       </div>
       <div class="field"><label>Progress Note</label><textarea id="v-note" rows="6" lang="en"></textarea></div>
+      ${examSectionHTML()}
       <div class="field">
         <label>처방</label>
         <div class="rx-preset" id="rx-preset-holder">${presetChipsHTML()}</div>
@@ -1479,6 +1852,16 @@ function togglePatientInfoEdit(){
   v.style.display = v.style.display === 'none' ? 'block' : 'none';
 }
 
+async function saveFlowNote(visitId, value){
+  try{
+    await db.collection('patients').doc(activePatientId).collection('visits').doc(visitId).update({flowNote: value});
+    const idx = activeVisitsCache.findIndex(v=>v.id===visitId);
+    if(idx>-1) activeVisitsCache[idx].flowNote = value;
+  }catch(err){
+    alert('비고 저장 실패: ' + err.message);
+  }
+}
+
 async function savePatientInfo(){
   const name = document.getElementById('p-name').value.trim();
   const regNo = document.getElementById('p-regno').value.trim();
@@ -1604,24 +1987,31 @@ async function saveVisit(silent){
       date: firebase.firestore.FieldValue.serverTimestamp(),
       bp, weight, glucose, progressNote, prescription, prescriptionItems, plan, photoURL, pdfURL,
       dispenseMode: rxMode,
-      createdBy: { name: currentUser.name, dept: currentUser.dept||'' }
+      createdBy: { name: currentUser.name, dept: activeDeptName || currentUser.dept || '' }
     });
 
-    if(rxMode === 'pharmacy' && prescription.trim() && activePatientData){
+    if(activeWaitingId){
+      // 여러 진료과가 이어서 진료하는 경우: 처방을 바로 약국에 보내지 않고 접수 세션에 누적 저장.
+      // 실제 약국 전송은 completeVisit()에서 "마지막 진료과"가 완료될 때 처리됨.
+      await db.collection('waitingList').doc(activeWaitingId).update({
+        sessionRx: prescriptionItems,
+        lastRxMode: rxMode
+      }).catch(()=>{});
+    } else if(rxMode === 'pharmacy' && prescription.trim() && activePatientData){
       await db.collection('pharmacyQueue').add({
         patientId: activePatientId,
         patientName: activePatientData.name,
         regNo: activePatientData.regNo,
         siteName: activePatientData.siteName,
-        prescription,
+        prescription, prescriptionItems,
         status: 'waiting',
         createdAt: firebase.firestore.FieldValue.serverTimestamp()
       });
     }
 
     if(!silent){
-      alert('진료 기록이 저장되었습니다.' + (rxMode==='pharmacy' ? ' (약국으로 전송됨)' : ''));
-      openChart(activePatientId, activeWaitingId);
+      alert('진료 기록이 저장되었습니다.' + (rxMode==='pharmacy' ? ' (진료 완료 처리 시 약국으로 전송됩니다)' : ''));
+      openChart(activePatientId, activeWaitingId, activeDeptIndex);
     }
   }catch(err){
     alert('저장 실패: ' + err.message + '\n\n이 메시지를 캡처해서 보내주세요.');
@@ -1638,7 +2028,44 @@ async function completeVisit(){
     }
   }
   if(activeWaitingId){
-    await db.collection('waitingList').doc(activeWaitingId).update({status:'done'});
+    try{
+      const wRef = db.collection('waitingList').doc(activeWaitingId);
+      const wDoc = await wRef.get();
+      if(wDoc.exists){
+        const wdata = wDoc.data();
+        let isLastDept = true;
+        let updatePayload = {status:'done'};
+        if(wdata.departments && wdata.departments.length){
+          const depts = wdata.departments.slice();
+          if(activeDeptIndex !== null && depts[activeDeptIndex]){
+            depts[activeDeptIndex] = {...depts[activeDeptIndex], status:'done', doctorName: currentUser.name, completedAt: new Date().toISOString()};
+          }
+          const overall = computeOverallStatus(depts);
+          isLastDept = overall === 'done';
+          updatePayload = {departments: depts, status: overall};
+        }
+        await wRef.update(updatePayload);
+
+        if(isLastDept && wdata.lastRxMode === 'pharmacy' && (wdata.sessionRx||[]).length && activePatientData){
+          const items = wdata.sessionRx;
+          const presText = rxItemsToText(items);
+          if(presText.trim()){
+            await db.collection('pharmacyQueue').add({
+              patientId: activePatientId,
+              patientName: activePatientData.name,
+              regNo: activePatientData.regNo,
+              siteName: activePatientData.siteName,
+              prescription: presText, prescriptionItems: items,
+              status: 'waiting',
+              createdAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          }
+        }
+      }
+    }catch(err){
+      console.error(err);
+      alert('진료 완료 처리 중 오류가 발생했습니다: ' + err.message);
+    }
   }
   setScreen('queue');
 }
@@ -1832,6 +2259,98 @@ async function submitQuickAppt(){
 }
 
 /* =========================================================
+   10-1. 검사실
+   ========================================================= */
+function renderLab(){
+  if(unsubscribeQueue){ unsubscribeQueue(); unsubscribeQueue=null; }
+  const main = document.getElementById('main');
+  main.innerHTML = `<div class="topbar"><h2>검사실</h2></div><div id="lab-list" class="queue"><div class="empty-note">${t('loading')}</div></div>`;
+  unsubscribeQueue = db.collection('labQueue')
+    .where('status','==','pending')
+    .orderBy('createdAt','asc')
+    .onSnapshot(snap=>{
+      const list = document.getElementById('lab-list');
+      if(!list) return;
+      if(snap.empty){ list.innerHTML = '<div class="empty-note">검사 대기 중인 환자가 없습니다.</div>'; return; }
+      list.innerHTML = snap.docs.map(d=>{
+        const l = d.data();
+        const itemNames = (l.items||[]).map(i=>i.name).join(', ');
+        return `<div class="queue-card" onclick="openLabOrder('${d.id}')">
+          <div class="qc-info">
+            <div class="name">${l.patientName} <span class="pharm-status">${l.deptName}</span></div>
+            <div class="meta">${l.regNo} · ${l.siteName} · ${itemNames}</div>
+          </div>
+        </div>`;
+      }).join('');
+    }, err=>{
+      const list = document.getElementById('lab-list');
+      if(list) list.innerHTML = `<div class="empty-note">목록을 불러오지 못했습니다. 아래 링크를 눌러 색인을 만들어주세요:<br>${linkify(err.message)}</div>`;
+    });
+}
+
+function openLabOrder(id){
+  db.collection('labQueue').doc(id).get().then(doc=>{
+    if(!doc.exists) return;
+    const l = doc.data();
+    openSidePanel(`
+      <div class="history-panel-head">
+        <span>${l.patientName} (${l.regNo}) · ${l.deptName} 검사</span>
+        <span style="cursor:pointer;" onclick="closeSidePanel()">✕ 닫기</span>
+      </div>
+      <div class="history-panel-body">
+        <div id="lab-order-items">${labOrderItemsHTML(id, l.items||[])}</div>
+        <button class="btn small" style="margin-top:14px;" onclick="completeLabOrder('${id}')">✅ 검사 완료</button>
+      </div>
+    `);
+  });
+}
+function labOrderItemsHTML(orderId, items){
+  return items.map((it,i)=>`
+    <div class="field">
+      <label>${it.name}</label>
+      <textarea rows="2" placeholder="결과 입력" onchange="updateLabResult('${orderId}',${i},this.value)">${it.result||''}</textarea>
+    </div>
+  `).join('');
+}
+async function updateLabResult(orderId, idx, value){
+  try{
+    const doc = await db.collection('labQueue').doc(orderId).get();
+    if(!doc.exists) return;
+    const items = (doc.data().items||[]).slice();
+    if(!items[idx]) return;
+    items[idx] = {...items[idx], result:value};
+    await doc.ref.update({items});
+  }catch(err){ alert('결과 저장 실패: ' + err.message); }
+}
+async function completeLabOrder(orderId){
+  const who = prompt('검사 완료 처리자 이름을 입력하세요');
+  if(!who) return;
+  try{
+    const doc = await db.collection('labQueue').doc(orderId).get();
+    if(!doc.exists) return;
+    const l = doc.data();
+    await doc.ref.update({status:'done', completedBy: who, completedAt: firebase.firestore.FieldValue.serverTimestamp()});
+    if(l.waitingId && l.deptIndex !== undefined && l.deptIndex !== null){
+      const wRef = db.collection('waitingList').doc(l.waitingId);
+      const wDoc = await wRef.get();
+      if(wDoc.exists){
+        const wdata = wDoc.data();
+        const depts = (wdata.departments||[]).slice();
+        if(depts[l.deptIndex]){
+          depts[l.deptIndex] = {...depts[l.deptIndex], status:'examDone'};
+          const overall = computeOverallStatus(depts);
+          await wRef.update({departments: depts, status: overall});
+        }
+      }
+    }
+    closeSidePanel();
+    alert('검사 완료 처리되었습니다. 대기 리스트에 "검사완료 대기중"으로 표시됩니다.');
+  }catch(err){
+    alert('처리 실패: ' + err.message);
+  }
+}
+
+/* =========================================================
    11. 약국 워크플로우
    ========================================================= */
 let pharmTab = 'all';
@@ -1887,8 +2406,7 @@ function renderPharmacy(){
         if(!list) return;
         const directDocs = snap.docs.filter(v=>{
           const d = v.data();
-          const note = (d.progressNote||'').trim();
-          return d.dispenseMode === 'direct' && note && note !== '(초진 등록)' && (d.prescription||'').trim();
+          return d.dispenseMode === 'direct' && isRealVisitDoc(d) && (d.prescription||'').trim();
         });
         if(directDocs.length === 0){ list.innerHTML = '<div class="empty-note">오늘 진료실에서 바로 투약 완료된 처방이 없습니다.</div>'; return; }
         const uniquePatientIds = [...new Set(directDocs.map(v=>v.ref.parent.parent.id))];
@@ -1908,7 +2426,7 @@ function renderPharmacy(){
               <div class="name">${p.name||'(알 수 없음)'} <span class="pharm-status">진료실 투약 완료</span></div>
               <div class="meta">${p.regNo||'-'} · ${p.siteName||'-'} · <span style="text-decoration:underline;">처방 보기</span></div>
             </div>
-            <div id="pharm-rx-direct-${v.id}" style="display:none; width:100%; font-size:12.5px; color:var(--ink-soft); margin-top:8px; padding-top:8px; border-top:1px solid var(--line); white-space:pre-wrap;">${v.data().prescription||'(처방 내용 없음)'}</div>
+            <div id="pharm-rx-direct-${v.id}" style="display:none; width:100%; font-size:12.5px; color:var(--ink-soft); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${pharmRxDisplayHTML(v.data().prescriptionItems, v.data().prescription)}</div>
           </div>`;
         }).join('');
       }).catch(err=>{
@@ -1935,7 +2453,7 @@ function renderPharmacy(){
               <div class="name">${p.patientName} <span class="pharm-status">완료</span></div>
               <div class="meta">${p.regNo} · ${p.siteName} · ${p.dispensedBy?('투약: '+p.dispensedBy):''} · <span style="text-decoration:underline;">처방 보기</span></div>
             </div>
-            <div id="pharm-rx-${d.id}" style="display:none; width:100%; font-size:12.5px; color:var(--ink-soft); margin-top:8px; padding-top:8px; border-top:1px solid var(--line); white-space:pre-wrap;">${p.prescription||'(처방 내용 없음)'}</div>
+            <div id="pharm-rx-${d.id}" style="display:none; width:100%; font-size:12.5px; color:var(--ink-soft); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${pharmRxDisplayHTML(p.prescriptionItems, p.prescription)}</div>
           </div>`;
         }).join('');
       }).catch(err=>{
@@ -1963,13 +2481,18 @@ function renderPharmacy(){
             <div class="meta">${p.regNo} · ${p.siteName} · <span style="text-decoration:underline;">처방 보기</span></div>
           </div>
           <button class="btn small" onclick="event.stopPropagation(); advancePharmacy('${d.id}','${p.status}')">${nextLabel}</button>
-          <div id="pharm-rx-${d.id}" style="display:none; width:100%; font-size:12.5px; color:var(--ink-soft); margin-top:8px; padding-top:8px; border-top:1px solid var(--line); white-space:pre-wrap;">${p.prescription||'(처방 내용 없음)'}</div>
+          <div id="pharm-rx-${d.id}" style="display:none; width:100%; font-size:12.5px; color:var(--ink-soft); margin-top:8px; padding-top:8px; border-top:1px solid var(--line);">${pharmRxDisplayHTML(p.prescriptionItems, p.prescription)}</div>
         </div>`;
       }).join('');
     }, err=>{
       const list = document.getElementById('pharm-list');
       if(list) list.innerHTML = `<div class="empty-note">목록을 불러오지 못했습니다. 아래 링크를 눌러 색인을 만들어주세요:<br>${linkify(err.message)}</div>`;
     });
+}
+
+function pharmRxDisplayHTML(items, text){
+  if(items && items.length) return rxItemsToTableHTML(items);
+  return `<p style="white-space:pre-wrap; margin:0;">${text || '(처방 내용 없음)'}</p>`;
 }
 
 function togglePharmRx(id){
@@ -2149,8 +2672,7 @@ async function loadStats(){
     patientsSnapAll.docs.forEach(d => { patientMap[d.id] = d.data(); });
 
     const realVisitDocs = visitsSnapRaw.docs.filter(v=>{
-      const note = (v.data().progressNote || '').trim();
-      if(note === '' || note === '(초진 등록)') return false;
+      if(!isRealVisitDoc(v.data())) return false;
       const patientId = v.ref.parent.parent.id;
       const pat = patientMap[patientId];
       if(!pat || pat.testPatient) return false;
@@ -2170,8 +2692,7 @@ async function loadStats(){
       const snap = await db.collection('patients').doc(pid).collection('visits')
         .orderBy('date','asc').limit(20).get();
       for(const d of snap.docs){
-        const note = (d.data().progressNote || '').trim();
-        if(note && note !== '(초진 등록)'){
+        if(isRealVisitDoc(d.data())){
           firstRealVisitIdMap[pid] = d.id;
           break;
         }
