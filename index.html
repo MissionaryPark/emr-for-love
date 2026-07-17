@@ -409,7 +409,7 @@ function enterApp(){
   initSites();
   renderNav();
   const initialScreen = currentUser.role==='doctor' ? 'queue' : currentUser.role==='pharmacy' ? 'pharmacy' : currentUser.role==='lab' ? 'lab' : 'reg';
-  history.replaceState({type:'screen', screen: initialScreen}, '', '#'+initialScreen);
+  history.replaceState({type:'screen', screen: initialScreen, app:true}, '', '#'+initialScreen);
   suppressHistoryPush = true;
   setScreen(initialScreen);
   suppressHistoryPush = false;
@@ -579,7 +579,9 @@ function setScreen(s){
   renderNav();
   renderMain();
   if(!suppressHistoryPush){
-    history.pushState({type:'screen', screen:s}, '', '#'+s);
+    // 사이드바로 화면만 바꾸는 건 "새로운 단계"로 취급하지 않고 현재 기록을 대체한다.
+    // (차트를 여는 것만 pushState로 별도 단계를 만든다 - 뒤로가기 시 목록으로 자연스럽게 돌아가도록)
+    history.replaceState({type:'screen', screen:s, app:true}, '', '#'+s);
   }
 }
 
@@ -1243,6 +1245,7 @@ let activeSessionRx = [];
 let activeExamOrder = null; // 현재 진료과의 진행중/완료된 검사 주문 {id, items, status} 또는 null
 let activeDraftDiagnoses = []; // 지금 작성 중인 진단명 목록 [{code, ko, en}]
 let activeCarriedRxRowThreshold = 0; // 이 값 미만 idx의 처방 행은 "다른 과가 이미 넣어둔 것"으로 간주 (내 처방 집계에서 제외)
+let rxRowPrescriberMap = {}; // idx -> {by, byDept} : 이전에 이미 처방된 약(다른 과에서 넘어온 것)의 원래 처방의 정보
 let presets = [];
 let examPresetItems = [];
 let customDiagnoses = []; // Firestore에 저장된, 사용자가 직접 추가한 진단명 (내장 목록에 없던 것들)
@@ -1337,8 +1340,17 @@ function presetChipsHTML(){
     <span class="rx-chip" style="display:inline-flex; align-items:center; gap:5px;">
       <span style="cursor:pointer;" onclick="applyPreset('${p.id}')">📋 ${p.name}</span>
       <span style="cursor:pointer; opacity:.55;" title="이름 변경" onclick="event.stopPropagation(); renamePreset('${p.id}')">✎</span>
+      <span style="cursor:pointer; color:var(--rust);" title="세트 삭제" onclick="event.stopPropagation(); deletePreset('${p.id}','${(p.name||'').replace(/'/g,"\\'")}')">✕</span>
     </span>`).join('')
     + `<div class="rx-chip" onclick="saveCurrentAsPreset()">+ 새 세트 저장</div>`;
+}
+async function deletePreset(id, name){
+  if(!confirm(`"${name}" 세트 처방을 삭제할까요? 이 작업은 되돌릴 수 없습니다.`)) return;
+  try{
+    await db.collection('presets').doc(id).delete();
+  }catch(err){
+    alert('세트 삭제 실패: ' + err.message);
+  }
 }
 function removeEmptyRxRows(){
   const tbody = document.getElementById('rx-table-body');
@@ -1397,6 +1409,7 @@ async function openChart(patientId, waitingId, deptIndex){
   activeExamOrder = null;
   activeDraftDiagnoses = [];
   activeCarriedRxRowThreshold = 0;
+  rxRowPrescriberMap = {};
   screenName = 'chart';
   renderNav();
   const main = document.getElementById('main');
@@ -1490,7 +1503,7 @@ async function openChart(patientId, waitingId, deptIndex){
   }
 
   if(!suppressHistoryPush){
-    history.pushState({type:'chart', patientId, waitingId, deptIndex: activeDeptIndex}, '', '#chart');
+    history.pushState({type:'chart', patientId, waitingId, deptIndex: activeDeptIndex, app:true}, '', '#chart');
   }
 }
 
@@ -1954,6 +1967,9 @@ function addRxRow(item, noFocus){
   const tbody = document.getElementById('rx-table-body');
   if(!tbody) return;
   tbody.insertAdjacentHTML('beforeend', rxRowHTML(idx, item));
+  if(item && item.by){
+    rxRowPrescriberMap[idx] = {by: item.by, byDept: item.byDept||''};
+  }
   if(!noFocus){
     const drugInput = document.getElementById(`rx-drug-${idx}`);
     if(drugInput) drugInput.focus();
@@ -1973,13 +1989,16 @@ function collectRxRows(){
     const idx = tr.id.replace('rx-row-','');
     const drug = document.getElementById(`rx-drug-${idx}`)?.value.trim();
     if(!drug) return;
+    const carried = rxRowPrescriberMap[idx];
     rows.push({
       drug,
       dose: document.getElementById(`rx-dose-${idx}`)?.value.trim() || '',
       freq: document.getElementById(`rx-freq-${idx}`)?.value || '',
       duration: document.getElementById(`rx-dur-${idx}`)?.value || '',
       timing: document.getElementById(`rx-timing-${idx}`)?.value || '',
-      note: document.getElementById(`rx-note-${idx}`)?.value.trim() || ''
+      note: document.getElementById(`rx-note-${idx}`)?.value.trim() || '',
+      by: carried ? carried.by : (currentUser ? currentUser.name : ''),
+      byDept: carried ? carried.byDept : (activeDeptName || (currentUser && currentUser.dept) || '')
     });
   });
   return rows;
@@ -2002,7 +2021,9 @@ function collectNewRxRows(){
       freq: document.getElementById(`rx-freq-${idx}`)?.value || '',
       duration: document.getElementById(`rx-dur-${idx}`)?.value || '',
       timing: document.getElementById(`rx-timing-${idx}`)?.value || '',
-      note: document.getElementById(`rx-note-${idx}`)?.value.trim() || ''
+      note: document.getElementById(`rx-note-${idx}`)?.value.trim() || '',
+      by: currentUser ? currentUser.name : '',
+      byDept: activeDeptName || (currentUser && currentUser.dept) || ''
     });
   });
   return rows;
@@ -2012,13 +2033,13 @@ function rxItemsToText(items){
   return (items||[]).map(i => `${i.drug} ${i.dose||''} ${i.freq||''} ${i.timing||''} ${i.duration?('x'+i.duration+'일'):''}${i.note?(' ['+i.note+']'):''}`.replace(/\s+/g,' ').trim()).join('\n');
 }
 
-function rxItemsToTableHTML(items){
+function rxItemsToTableHTML(items, showPrescriber){
   if(!items || items.length===0) return '';
   const rows = items.map(i=>`
-    <tr><td>${i.drug}</td><td>${i.dose||'-'}</td><td>${i.freq||'-'}</td><td>${i.timing||'-'}</td><td>${i.duration?i.duration+'일':'-'}</td><td>${i.note||'-'}</td></tr>
+    <tr><td>${i.drug}</td><td>${i.dose||'-'}</td><td>${i.freq||'-'}</td><td>${i.timing||'-'}</td><td>${i.duration?i.duration+'일':'-'}</td><td>${i.note||'-'}</td>${showPrescriber?`<td>${i.byDept?i.byDept+' · ':''}${i.by||'-'}</td>`:''}</tr>
   `).join('');
   return `<table class="chronic-table" style="margin-top:6px;">
-    <tr><th>약품명</th><th>용량</th><th>빈도</th><th>시기</th><th>기간</th><th>기타사항</th></tr>${rows}
+    <tr><th>약품명</th><th>용량</th><th>빈도</th><th>시기</th><th>기간</th><th>기타사항</th>${showPrescriber?'<th>처방의</th>':''}</tr>${rows}
   </table>`;
 }
 
@@ -2969,7 +2990,7 @@ function renderPharmacy(){
 }
 
 function pharmRxDisplayHTML(items, text){
-  if(items && items.length) return rxItemsToTableHTML(items);
+  if(items && items.length) return rxItemsToTableHTML(items, true);
   return `<p style="white-space:pre-wrap; margin:0;">${text || '(처방 내용 없음)'}</p>`;
 }
 
@@ -3002,6 +3023,7 @@ let statsRangeType = 'month';
 let statsCustomStart = null;
 let statsCustomEnd = null;
 let statsVisitList = [];
+let statsDeptVisitList = []; // "진료 건수" 클릭 시 과별로 골라보기 위한 명단
 let statsSiteFilter = 'all';
 let statsListFilter = 'all';
 
@@ -3045,12 +3067,71 @@ function closeStatsAndOpenChart(patientId){
   openChart(patientId, null);
 }
 
+// "진료 건수" 타일을 누르면 이 기간에 실제로 등장한 진료과 목록을 보여주고, 하나를 고르면 그 과의 진료 명단을 보여준다.
+function showDeptVisitPicker(){
+  const deptCounts = {};
+  statsDeptVisitList.forEach(v=>{ deptCounts[v.deptName] = (deptCounts[v.deptName]||0) + 1; });
+  const depts = Object.entries(deptCounts).sort((a,b)=>b[1]-a[1]);
+  if(depts.length === 0){
+    openSidePanel(`
+      <div class="history-panel-head"><span>진료과 선택</span><span style="cursor:pointer;" onclick="closeSidePanel()">✕ 닫기</span></div>
+      <div class="history-panel-body"><div class="empty-note">이 기간에 진료 기록이 없습니다.</div></div>
+    `);
+    return;
+  }
+  const buttons = depts.map(([name,count])=>`
+    <button class="btn small outline" style="margin:4px; width:calc(50% - 8px);" onclick="renderDeptVisitList('${name.replace(/'/g,"\\'")}')">${name} (${count}건)</button>
+  `).join('');
+  openSidePanel(`
+    <div class="history-panel-head"><span>진료과 선택</span><span style="cursor:pointer;" onclick="closeSidePanel()">✕ 닫기</span></div>
+    <div class="history-panel-body">
+      <div class="note" style="margin-bottom:8px;">과를 선택하면 이 기간에 그 과에서 진료한 환자 명단을 볼 수 있습니다.</div>
+      <div style="display:flex; flex-wrap:wrap;">${buttons}</div>
+      <div id="dept-visit-list-holder" style="margin-top:14px;"></div>
+    </div>
+  `);
+}
+function renderDeptVisitList(deptName){
+  const holder = document.getElementById('dept-visit-list-holder');
+  if(!holder) return;
+  const list = statsDeptVisitList.filter(v=>v.deptName===deptName)
+    .sort((a,b)=>{
+      const ta = a.date?.toDate ? a.date.toDate().getTime() : 0;
+      const tb = b.date?.toDate ? b.date.toDate().getTime() : 0;
+      return tb - ta;
+    });
+  holder.innerHTML = `<h3 style="margin-bottom:8px;">${deptName} 진료 명단 (${list.length}건)</h3>` + list.map(v=>`
+    <div class="queue-card" onclick="closeSidePanel(); closeStatsAndOpenChart('${v.patientId}')">
+      <div class="qc-info">
+        <div class="name">${v.name}</div>
+        <div class="meta">${v.siteName} · ${fmtDate(v.date)}${v.doctorName?(' · '+v.doctorName):''}</div>
+      </div>
+      <div style="text-align:right;">
+        <div class="qc-regno mono">${v.regNo}</div>
+        <div style="font-size:11px; color:var(--ink-soft); margin-top:3px; white-space:nowrap;">${v.currentStatus||''}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+let statsTab = 'clinic'; // 'clinic' | 'lab' | 'pharmacy'
+function setStatsTab(tab){
+  statsTab = tab;
+  renderMain();
+  loadStats();
+}
+
 function statsScreenHTML(){
   const today = new Date().toISOString().slice(0,10);
   const siteOptions = `<option value="all" ${statsSiteFilter==='all'?'selected':''}>전체 사이트</option>`
     + sites.map(s=>`<option value="${s.id}" ${s.id===statsSiteFilter?'selected':''}>${s.name}</option>`).join('');
   return `
     <div class="topbar"><h2>통계 / 보고서</h2></div>
+    <div style="display:flex; gap:8px; margin-bottom:12px;">
+      <div class="nav-item ${statsTab==='clinic'?'active':''}" style="flex:1; text-align:center; border-radius:8px;" onclick="setStatsTab('clinic')">🩺 진료실 통계</div>
+      <div class="nav-item ${statsTab==='lab'?'active':''}" style="flex:1; text-align:center; border-radius:8px;" onclick="setStatsTab('lab')">🧪 검사실 통계</div>
+      <div class="nav-item ${statsTab==='pharmacy'?'active':''}" style="flex:1; text-align:center; border-radius:8px;" onclick="setStatsTab('pharmacy')">💊 약국 통계</div>
+    </div>
     <div class="card">
       <div class="field" style="max-width:260px; margin-bottom:12px;">
         <label>사이트</label>
@@ -3112,6 +3193,12 @@ function getStatsRangeDates(){
 }
 
 async function loadStats(){
+  if(statsTab === 'lab') return loadLabStats();
+  if(statsTab === 'pharmacy') return loadPharmacyStats();
+  return loadClinicStats();
+}
+
+async function loadClinicStats(){
   const body = document.getElementById('stats-body');
   if(!body) return;
   body.innerHTML = `<div class="empty-note">${t('loading')}</div>`;
@@ -3219,6 +3306,29 @@ async function loadStats(){
     const newInRange = statsVisitList.filter(v=>v.isNew).length;
     const returnVisitsInRange = sessionCount - newInRange;
 
+    // "진료 건수"를 눌렀을 때 과별로 골라볼 수 있도록, 방문 문서 하나당 진료과 수만큼 행을 풀어서 만들어둔다.
+    statsDeptVisitList = [];
+    realVisitDocs.forEach(v=>{
+      const patientId = v.ref.parent.parent.id;
+      const p = patientMap[patientId] || {};
+      const de = Array.isArray(v.data().deptEntries) ? v.data().deptEntries : null;
+      if(de && de.length){
+        de.forEach(e=>{
+          statsDeptVisitList.push({
+            patientId, name: p.name||'(알 수 없음)', regNo: p.regNo||'-', siteName: p.siteName||'-',
+            date: v.data().date, deptName: e.deptName||'일반진료', doctorName: e.doctorName||'',
+            currentStatus: currentStatusLabel(patientId)
+          });
+        });
+      } else {
+        statsDeptVisitList.push({
+          patientId, name: p.name||'(알 수 없음)', regNo: p.regNo||'-', siteName: p.siteName||'-',
+          date: v.data().date, deptName: '(과 정보 없음)', doctorName: '',
+          currentStatus: currentStatusLabel(patientId)
+        });
+      }
+    });
+
 
 
     let rxCount = {};
@@ -3247,7 +3357,7 @@ async function loadStats(){
             <div style="font-size:26px; font-weight:700; font-family:ui-monospace,monospace;">${sessionCount}</div>
             <div style="font-size:12px; color:var(--ink-soft);">접수 건수</div>
           </div>
-          <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px;">
+          <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px; cursor:pointer;" onclick="showDeptVisitPicker()">
             <div style="font-size:26px; font-weight:700; font-family:ui-monospace,monospace;">${deptVisitCount}</div>
             <div style="font-size:12px; color:var(--ink-soft);">진료 건수 (진료과 합계)</div>
           </div>
@@ -3281,6 +3391,171 @@ async function loadStats(){
     `;
   }catch(err){
     body.innerHTML = `<div class="empty-note">통계를 불러오지 못했습니다. Firestore 색인이 필요할 수 있습니다.<br>${linkify(err.message)}</div>`;
+  }
+}
+
+// 검사실 통계: 이 기간에 들어온 검사 처방 건수, 상태별 현황, 어느 과에서 많이 의뢰했는지,
+// 어떤 검사가 자주 나가는지, 검사 접수부터 결과 완료까지 평균 처리 시간을 보여준다.
+async function loadLabStats(){
+  const body = document.getElementById('stats-body');
+  if(!body) return;
+  body.innerHTML = `<div class="empty-note">${t('loading')}</div>`;
+  try{
+    const {start, end} = getStatsRangeDates();
+    const startTs = firebase.firestore.Timestamp.fromDate(start);
+    const endTs = firebase.firestore.Timestamp.fromDate(end);
+    const snap = await db.collection('labQueue').where('createdAt','>=',startTs).where('createdAt','<=',endTs).get();
+    let docs = snap.docs.map(d=>d.data());
+    if(statsSiteFilter!=='all'){
+      const siteName = sites.find(s=>s.id===statsSiteFilter)?.name;
+      docs = docs.filter(d=>d.siteName===siteName);
+    }
+    const total = docs.length;
+    const pending = docs.filter(d=>d.status!=='done').length;
+    const done = docs.filter(d=>d.status==='done').length;
+
+    const byDept = {};
+    const byItem = {};
+    let turnaroundSum = 0, turnaroundCount = 0;
+    docs.forEach(d=>{
+      byDept[d.deptName||'(과 정보 없음)'] = (byDept[d.deptName||'(과 정보 없음)']||0) + 1;
+      (d.items||[]).forEach(it=>{ byItem[it.name] = (byItem[it.name]||0) + 1; });
+      if(d.status==='done' && d.createdAt?.toDate && d.completedAt?.toDate){
+        turnaroundSum += (d.completedAt.toDate().getTime() - d.createdAt.toDate().getTime());
+        turnaroundCount++;
+      }
+    });
+    const avgTurnaroundMin = turnaroundCount ? Math.round(turnaroundSum / turnaroundCount / 60000) : null;
+    const deptRows = Object.entries(byDept).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('') || '<tr><td colspan="2">데이터 없음</td></tr>';
+    const itemRows = Object.entries(byItem).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('') || '<tr><td colspan="2">데이터 없음</td></tr>';
+
+    const rangeLabel = `${start.toISOString().slice(0,10)} ~ ${end.toISOString().slice(0,10)}`;
+    const siteLabel = statsSiteFilter==='all' ? '전체 사이트' : (sites.find(s=>s.id===statsSiteFilter)?.name || '전체 사이트');
+
+    body.innerHTML = `
+      <div class="note">선택 사이트: ${siteLabel} · 선택 기간: ${rangeLabel}</div>
+      <div class="card" style="margin-bottom:16px;">
+        <h3>검사실 처리 현황</h3>
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px;">
+          <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px;">
+            <div style="font-size:26px; font-weight:700; font-family:ui-monospace,monospace;">${total}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">총 검사 처방</div>
+          </div>
+          <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px;">
+            <div style="font-size:26px; font-weight:700; font-family:ui-monospace,monospace;">${done}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">결과 완료</div>
+          </div>
+          <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px;">
+            <div style="font-size:26px; font-weight:700; font-family:ui-monospace,monospace;">${pending}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">대기중</div>
+          </div>
+        </div>
+        <div class="note" style="margin-top:8px;">${avgTurnaroundMin!==null ? `검사 의뢰부터 결과 완료까지 평균 ${avgTurnaroundMin}분 소요` : '완료된 검사가 없어 평균 처리 시간을 계산할 수 없습니다'}</div>
+      </div>
+      <div class="grid2" style="margin-bottom:16px;">
+        <div class="card"><h3>진료과별 검사 의뢰</h3><table class="chronic-table"><tr><th>진료과</th><th>건수</th></tr>${deptRows}</table></div>
+        <div class="card"><h3>자주 나가는 검사 (상위 10)</h3><table class="chronic-table"><tr><th>검사명</th><th>건수</th></tr>${itemRows}</table></div>
+      </div>
+    `;
+  }catch(err){
+    body.innerHTML = `<div class="empty-note">검사실 통계를 불러오지 못했습니다. Firestore 색인이 필요할 수 있습니다.<br>${linkify(err.message)}</div>`;
+  }
+}
+
+// 약국 통계: 약국으로 전송된 처방(pharmacyQueue) + 진료실에서 바로 투약 처리한 처방(direct)을 합쳐서
+// 전체 처방/투약 현황과 자주 나가는 약, 조제~투약까지 평균 처리 시간을 보여준다.
+async function loadPharmacyStats(){
+  const body = document.getElementById('stats-body');
+  if(!body) return;
+  body.innerHTML = `<div class="empty-note">${t('loading')}</div>`;
+  try{
+    const {start, end} = getStatsRangeDates();
+    const startTs = firebase.firestore.Timestamp.fromDate(start);
+    const endTs = firebase.firestore.Timestamp.fromDate(end);
+
+    const pharmSnap = await db.collection('pharmacyQueue').where('createdAt','>=',startTs).where('createdAt','<=',endTs).get();
+    let pharmDocs = pharmSnap.docs.map(d=>d.data());
+    if(statsSiteFilter!=='all'){
+      const siteName = sites.find(s=>s.id===statsSiteFilter)?.name;
+      pharmDocs = pharmDocs.filter(d=>d.siteName===siteName);
+    }
+
+    const directSnap = await db.collectionGroup('visits').where('date','>=',startTs).where('date','<=',endTs).get();
+    const directDocs = directSnap.docs.filter(v=>{
+      const d = v.data();
+      return d.dispenseMode === 'direct' && isRealVisitDoc(d) && (d.prescription||'').trim();
+    }).map(v=>v.data());
+
+    const totalPharmacyRoute = pharmDocs.length;
+    const totalDirectRoute = directDocs.length;
+    const waiting = pharmDocs.filter(d=>d.status==='waiting').length;
+    const prepared = pharmDocs.filter(d=>d.status==='prepared').length;
+    const dispensed = pharmDocs.filter(d=>d.status==='dispensed').length;
+
+    let turnaroundSum = 0, turnaroundCount = 0;
+    pharmDocs.forEach(d=>{
+      if(d.dispensedAt?.toDate && d.createdAt?.toDate){
+        turnaroundSum += (d.dispensedAt.toDate().getTime() - d.createdAt.toDate().getTime());
+        turnaroundCount++;
+      }
+    });
+    const avgTurnaroundMin = turnaroundCount ? Math.round(turnaroundSum / turnaroundCount / 60000) : null;
+
+    const drugCount = {};
+    const tally = (items, text)=>{
+      if(items && items.length){
+        items.forEach(it=>{ if(it.drug) drugCount[it.drug] = (drugCount[it.drug]||0) + 1; });
+      } else if(text){
+        text.split('\n').forEach(line=>{
+          const name = line.trim().split(' ')[0];
+          if(name) drugCount[name] = (drugCount[name]||0) + 1;
+        });
+      }
+    };
+    pharmDocs.forEach(d=>tally(d.prescriptionItems, d.prescription));
+    directDocs.forEach(d=>tally(d.prescriptionItems, d.prescription));
+    const drugRows = Object.entries(drugCount).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('') || '<tr><td colspan="2">데이터 없음</td></tr>';
+
+    const rangeLabel = `${start.toISOString().slice(0,10)} ~ ${end.toISOString().slice(0,10)}`;
+    const siteLabel = statsSiteFilter==='all' ? '전체 사이트' : (sites.find(s=>s.id===statsSiteFilter)?.name || '전체 사이트');
+
+    body.innerHTML = `
+      <div class="note">선택 사이트: ${siteLabel} · 선택 기간: ${rangeLabel}</div>
+      <div class="card" style="margin-bottom:16px;">
+        <h3>처방 경로별 현황</h3>
+        <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:10px;">
+          <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px;">
+            <div style="font-size:26px; font-weight:700; font-family:ui-monospace,monospace;">${totalPharmacyRoute}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">약국 전송분 (단기팀)</div>
+          </div>
+          <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px;">
+            <div style="font-size:26px; font-weight:700; font-family:ui-monospace,monospace;">${totalDirectRoute}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">진료실 직접투약</div>
+          </div>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:16px;">
+        <h3>약국 전송분 처리 현황</h3>
+        <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px;">
+          <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px;">
+            <div style="font-size:22px; font-weight:700; font-family:ui-monospace,monospace;">${waiting}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">조제 대기</div>
+          </div>
+          <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px;">
+            <div style="font-size:22px; font-weight:700; font-family:ui-monospace,monospace;">${prepared}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">투약 대기</div>
+          </div>
+          <div style="text-align:center; padding:8px; background:var(--paper); border-radius:8px;">
+            <div style="font-size:22px; font-weight:700; font-family:ui-monospace,monospace;">${dispensed}</div>
+            <div style="font-size:12px; color:var(--ink-soft);">투약 완료</div>
+          </div>
+        </div>
+        <div class="note" style="margin-top:8px;">${avgTurnaroundMin!==null ? `처방 접수부터 투약 완료까지 평균 ${avgTurnaroundMin}분 소요` : '투약 완료된 건이 없어 평균 처리 시간을 계산할 수 없습니다'}</div>
+      </div>
+      <div class="card"><h3>자주 나가는 약 (상위 10, 약국+직접투약 합산)</h3><table class="chronic-table"><tr><th>약품명</th><th>건수</th></tr>${drugRows}</table></div>
+    `;
+  }catch(err){
+    body.innerHTML = `<div class="empty-note">약국 통계를 불러오지 못했습니다. Firestore 색인이 필요할 수 있습니다.<br>${linkify(err.message)}</div>`;
   }
 }
 
