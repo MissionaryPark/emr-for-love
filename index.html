@@ -1442,6 +1442,7 @@ function removeEmptyRxRows(){
   if(!tbody) return;
   tbody.querySelectorAll('tr').forEach(tr=>{
     const idx = tr.id.replace('rx-row-','');
+    if(rxRowLockedItems[idx]) return; // 다른 과의 잠긴(읽기전용) 처방행은 입력창이 없으므로 "빈 줄"로 오인해 지우면 안 됨
     const drug = document.getElementById(`rx-drug-${idx}`)?.value.trim();
     if(!drug) tr.remove();
   });
@@ -1785,11 +1786,13 @@ async function searchDiagnosisViaGemini(query, isRetry){
     window.__dxSearchMatches = results;
     window.__dxSearchFromAI = true;
   }catch(err){
-    const isTransient = /high demand|503|overloaded|UNAVAILABLE|timeout/i.test(err.message||'');
+    const isTransient = /high demand|503|overloaded|UNAVAILABLE|timeout|quota|429/i.test(err.message||'');
     if(isTransient && !isRetry){
-      // 구글 서버 쪽 일시적 혼잡은 잠깐 기다렸다가 자동으로 한 번 더 시도해본다.
-      box.innerHTML = `<div style="padding:10px; font-size:13px; color:var(--ink-soft);">AI 서버가 잠시 혼잡합니다. 자동으로 다시 시도하는 중...</div>`;
-      setTimeout(()=>searchDiagnosisViaGemini(query, true), 1500);
+      // "Please retry in 30.9s" 같은 안내가 있으면 그 시간만큼, 없으면 기본 2초 기다렸다가 자동으로 한 번 더 시도
+      const waitMatch = (err.message||'').match(/retry in ([\d.]+)s/i);
+      const waitMs = waitMatch ? Math.ceil(parseFloat(waitMatch[1])*1000) + 500 : 2000;
+      box.innerHTML = `<div style="padding:10px; font-size:13px; color:var(--ink-soft);">AI 서버가 혼잡합니다 (${Math.round(waitMs/1000)}초 후 자동 재시도)...</div>`;
+      setTimeout(()=>searchDiagnosisViaGemini(query, true), waitMs);
       return;
     }
     const qEscapedRetry = query.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;');
@@ -3804,9 +3807,9 @@ async function loadPharmacyStats(){
       return d.dispenseMode === 'direct' && isRealVisitDoc(d) && (d.prescription||'').trim();
     });
     const directPatientIds = [...new Set(directCandidates.map(v=>v.ref.parent.parent.id))];
-    const directPatientDocs = await Promise.all(directPatientIds.map(pid=>db.collection('patients').doc(pid).get()));
+    const allPatientsForFilter = await getAllPatientsCached(); // 1분 캐시된 전체 환자 목록 재사용 (건별로 서버 조회하지 않음 → 훨씬 빠름)
     const directPatientMap = {};
-    directPatientDocs.forEach(d=>{ if(d.exists) directPatientMap[d.id] = d.data(); });
+    allPatientsForFilter.forEach(p=>{ if(directPatientIds.includes(p.id)) directPatientMap[p.id] = p; });
     const directDocs = directCandidates.filter(v=>{
       const pat = directPatientMap[v.ref.parent.parent.id];
       return !(pat && pat.testPatient);
