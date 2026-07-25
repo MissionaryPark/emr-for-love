@@ -3803,13 +3803,19 @@ async function loadClinicStats(){
       return statsDeptFilter==='all' || (deptName||'일반진료')===statsDeptFilter;
     }
 
+    let dbgTotal=0, dbgReal=0, dbgHasPatient=0, dbgSiteOk=0, dbgDeptOk=0;
     const realVisitDocs = visitsSnapRaw.docs.filter(v=>{
+      dbgTotal++;
       if(!isRealVisitDoc(v.data())) return false;
+      dbgReal++;
       const patientId = v.ref.parent.parent.id;
       const pat = patientMap[patientId];
       if(!pat || pat.testPatient) return false;
+      dbgHasPatient++;
       if(statsSiteFilter!=='all' && pat.siteId !== statsSiteFilter) return false;
+      dbgSiteOk++;
       if(statsDeptFilter!=='all' && !deptEntriesOf(v).some(e=>matchesDeptFilter(e.deptName))) return false;
+      dbgDeptOk++;
       return true;
     });
     const sessionCount = realVisitDocs.length; // 접수 건수 (한 번의 접수 = 여러 과가 봤어도 문서 1건. 진료과 지정 시: 그 과가 포함된 세션 수)
@@ -3982,6 +3988,7 @@ async function loadClinicStats(){
 
     body.innerHTML = `
       <div class="note">선택 사이트: ${siteLabel} · 선택 진료과: ${statsDeptFilter==='all'?'전체':statsDeptFilter} · 선택 기간: ${rangeLabel} (접수·신환·재진·진료건수·처방·진단 통계는 이 기간+진료과 기준, 사이트/연령/만성질환 표는 전체 누적 기준)</div>
+      <div class="note" style="opacity:0.75; font-size:12.5px;">진단 정보 — 이 기간의 방문기록 ${dbgTotal}건 → 실제진료 판정 통과 ${dbgReal}건 → 환자정보 연결 ${dbgHasPatient}건 → 사이트 조건 통과 ${dbgSiteOk}건 → 진료과 조건 통과 ${dbgDeptOk}건</div>
       <div class="card" style="margin-bottom:16px;">
         <h3>기간 내 진료 현황 (숫자를 눌러서 명단 보기)</h3>
         <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:10px;">
