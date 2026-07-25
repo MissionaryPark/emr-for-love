@@ -473,8 +473,9 @@ window.addEventListener('popstate', function(e){
   suppressHistoryPush = true;
   try{
     if(e.state.type === 'chart'){
-      openChart(e.state.patientId, e.state.waitingId, e.state.deptIndex);
+      openChart(e.state.patientId, e.state.waitingId, e.state.deptIndex); // openChart 내부에서 이전 차트 임시 저장을 처리
     } else if(e.state.type === 'screen'){
+      autoSaveChartDraftIfLeaving(); // 진료 중이던 차트를 떠나는 경우, 작성 중이던 내용을 잃지 않도록 임시 저장
       screenName = e.state.screen;
       renderNav();
       renderMain();
@@ -556,6 +557,26 @@ function onSiteChange(){
   if(['queue','search'].includes(screenName)) renderMain();
 }
 
+// 신규 환자 등록/환자 검색 화면에서 사이트를 바꿔도, 프로그램을 닫기 전까지는 그 사이트가
+// 계속 기본값으로 유지되도록 전역 currentSiteId(및 좌측 사이드바 선택값)를 함께 갱신한다.
+function onRegSiteChange(){
+  const val = document.getElementById('r-site').value;
+  if(val){
+    currentSiteId = val;
+    const sel = document.getElementById('site-select');
+    if(sel) sel.value = val;
+  }
+  updateRegNoPreview();
+}
+function onSearchSiteChange(){
+  const val = document.getElementById('search-site').value;
+  if(val){ // "전체 사이트"(빈 값) 선택 시에는 기본 사이트를 바꾸지 않는다
+    currentSiteId = val;
+    const sel = document.getElementById('site-select');
+    if(sel) sel.value = val;
+  }
+}
+
 async function addSite(){
   const name = document.getElementById('new-site-name').value.trim();
   const prefix = document.getElementById('new-site-prefix').value.trim();
@@ -628,6 +649,7 @@ let unsubscribeQueue = null;
 let suppressHistoryPush = false;
 
 function setScreen(s){
+  autoSaveChartDraftIfLeaving(); // 진료 중이던 차트를 떠나는 경우, 작성 중이던 내용을 잃지 않도록 임시 저장
   screenName = s;
   renderNav();
   renderMain();
@@ -1096,7 +1118,7 @@ function regScreenHTML(){
         <div class="field"><label>${t('gender')}</label><select id="r-gender"><option>${t('female')}</option><option>${t('male')}</option></select></div>
         <div class="field"><label>${t('age')}</label><input id="r-age" type="text" placeholder="예: 35 또는 10개월"></div>
         <div class="field"><label>${t('phone')}</label><input id="r-phone"></div>
-        <div class="field"><label>${t('site')}</label><select id="r-site" onchange="updateRegNoPreview()">${siteOptions}</select></div>
+        <div class="field"><label>${t('site')}</label><select id="r-site" onchange="onRegSiteChange()">${siteOptions}</select></div>
       </div>
       ${deptPickerHTML('reg')}
       <div class="field" style="margin-top:6px;">
@@ -1258,7 +1280,7 @@ function searchScreenHTML(){
     <div class="card">
       <div class="grid2">
         <div class="field"><label>등록번호 또는 이름</label><input id="search-q" placeholder="${t('searchPlaceholder')}"></div>
-        <div class="field"><label>사이트</label><select id="search-site">${siteOptions}</select></div>
+        <div class="field"><label>사이트</label><select id="search-site" onchange="onSearchSiteChange()">${siteOptions}</select></div>
       </div>
       <button class="btn small" onclick="doSearch()">${t('search')}</button>
     </div>
@@ -1533,6 +1555,7 @@ async function openChartSafely(patientId){
 }
 
 async function openChart(patientId, waitingId, deptIndex){
+  await autoSaveChartDraftIfLeaving(); // 이전에 다른 환자/과의 차트가 열려있었다면, 그 내용을 잃지 않도록 먼저 임시 저장
   activePatientId = patientId;
   activeWaitingId = waitingId;
   activeDeptIndex = (deptIndex===undefined) ? null : deptIndex;
@@ -1963,16 +1986,7 @@ async function sendExamOrder(){
     }
     // 검사실로 넘기면 이 진료과는 "검사대기중"이 되어 검사가 끝날 때까지 차트를 다시 열 수 없으므로,
     // 지금까지 작성해둔 내용(활력징후/소견/처방/진단명)을 잃어버리지 않도록 임시 저장해둔다.
-    const draftNote = {
-      bp: document.getElementById('v-bp')?.value || '',
-      weight: document.getElementById('v-weight')?.value || '',
-      glucose: document.getElementById('v-glucose')?.value || '',
-      note: document.getElementById('v-note')?.value || '',
-      plan: document.getElementById('v-plan')?.value || '',
-      rxMode: document.getElementById('v-rx-mode')?.value || '',
-      rxItems: collectRxRows(),
-      diagnoses: (typeof activeDraftDiagnoses !== 'undefined') ? activeDraftDiagnoses.slice() : []
-    };
+    const draftNote = collectCurrentDraftNote();
     depts[activeDeptIndex] = {...dept, status:'examPending', examOrderId, draftNote};
     const overall = computeOverallStatus(depts);
     await wRef.update({departments: depts, status: overall});
@@ -2004,6 +2018,12 @@ function backupScreenHTML(){
       <p style="font-size:14.5px; color:var(--ink-soft);">같은 등록번호로 환자가 두 번 이상 등록되어 있는 경우를 찾아서, 진료기록이 가장 많은 하나만 남기고 나머지를 삭제합니다. 정리 후 "사이트 관리"에서 번호 동기화를 한 번씩 눌러주시는 걸 권장해요.</p>
       <button class="btn small outline" id="dedupe-btn" onclick="cleanupDuplicatePatients()">중복 등록번호 정리하기</button>
       <div id="dedupe-log" style="margin-top:10px; font-size:14px; color:var(--ink-soft); white-space:pre-wrap;"></div>
+    </div>
+    <div class="card">
+      <h3>신환/재진 판정 데이터 정리 (1회 실행용)</h3>
+      <p style="font-size:14.5px; color:var(--ink-soft);">이제 진료를 저장할 때마다 그 환자의 "첫 실제 진료" 기록을 환자 정보에 자동으로 표시해두어, 통계 화면에서 신환/재진을 훨씬 빠르게 계산합니다. 이 버튼은 <b>이 기능이 추가되기 전에 이미 등록된 환자들</b>에게 그 표시를 한 번에 채워 넣는 작업입니다. 한 번만 실행하면 되고, 환자 수가 많으면 몇 분 정도 걸릴 수 있습니다. 실행 후에는 통계 화면이 눈에 띄게 빨라집니다.</p>
+      <button class="btn small outline" id="migrate-firstvisit-btn" onclick="migrateFirstVisitIds()">신환 판정 데이터 정리하기</button>
+      <div id="migrate-firstvisit-log" style="margin-top:10px; font-size:14px; color:var(--ink-soft); white-space:pre-wrap;"></div>
     </div>
   `;
 }
@@ -2080,6 +2100,49 @@ async function markImportedPatients(){
   }
   btn.disabled = false;
   btn.textContent = '가져온 환자 표시하기';
+}
+
+async function migrateFirstVisitIds(){
+  if(!confirm('모든 환자의 "첫 실제 진료" 기록을 확인해서 표시해둘까요? 통계 화면 속도를 크게 개선해주는 1회성 작업입니다. 환자 수가 많으면 몇 분 정도 걸릴 수 있어요.')) return;
+  const btn = document.getElementById('migrate-firstvisit-btn');
+  const log = document.getElementById('migrate-firstvisit-log');
+  btn.disabled = true;
+  btn.textContent = '확인 중...';
+  log.textContent = '';
+  try{
+    const patientsSnap = await db.collection('patients').get();
+    const targets = patientsSnap.docs.filter(d=>{
+      const p = d.data();
+      return !p.firstVisitId && !p.imported && !p.testPatient;
+    });
+    log.textContent = `대상 환자: ${targets.length}명 (이미 표시되어 있거나 가져온/테스트 환자는 제외)\n`;
+    const updates = [];
+    let done = 0;
+    const CHUNK = 25; // 한 번에 너무 많은 요청을 보내지 않도록 25명씩 묶어서 처리
+    for(let i=0; i<targets.length; i+=CHUNK){
+      const chunk = targets.slice(i, i+CHUNK);
+      await Promise.all(chunk.map(async doc=>{
+        const snap = await doc.ref.collection('visits').orderBy('date','asc').limit(20).get();
+        for(const v of snap.docs){
+          if(isRealVisitDoc(v.data())){ updates.push({ref:doc.ref, firstId:v.id}); break; }
+        }
+      }));
+      done += chunk.length;
+      log.textContent = `대상 환자: ${targets.length}명 / 확인 완료 ${done}명 (첫 진료 발견 ${updates.length}명)\n`;
+    }
+    for(let i=0; i<updates.length; i+=400){
+      const batch = db.batch();
+      updates.slice(i,i+400).forEach(u => batch.update(u.ref, {firstVisitId: u.firstId}));
+      await batch.commit();
+    }
+    log.textContent += `=== 완료: ${targets.length}명 확인, ${updates.length}명에게 첫 진료 기록을 표시함 ===\n(나머지 ${targets.length-updates.length}명은 아직 실제 진료 기록이 없어서 다음 진료 저장 시 자동으로 표시됩니다)`;
+    alert(`완료: ${updates.length}명에게 첫 진료 기록을 표시했습니다. 이제 통계 화면이 더 빨라집니다.`);
+  }catch(err){
+    alert('처리 실패: ' + err.message);
+    log.textContent += '오류: ' + err.message;
+  }
+  btn.disabled = false;
+  btn.textContent = '신환 판정 데이터 정리하기';
 }
 
 async function exportAllData(){
@@ -2167,14 +2230,42 @@ function rxRowHTML(idx, item, locked, owner){
   }
   return `
     <tr id="rx-row-${idx}">
-      <td><input id="rx-drug-${idx}" placeholder="약품명" value="${item.drug||''}" onchange="checkDuplicateRxDrug(${idx})" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:5px;"></td>
-      <td><input id="rx-dose-${idx}" placeholder="예: 500mg" value="${item.dose||''}" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:5px;"></td>
-      <td><select id="rx-freq-${idx}" style="width:100%; padding:5px;">${rxOptionsHTML(RX_FREQ_OPTIONS, item.freq)}</select></td>
-      <td><input id="rx-dur-${idx}" type="number" placeholder="일수" value="${item.duration||''}" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:5px;"></td>
-      <td><select id="rx-timing-${idx}" style="width:100%; padding:5px;">${rxOptionsHTML(RX_TIMING_OPTIONS, item.timing)}</select></td>
-      <td><input id="rx-note-${idx}" placeholder="약국 참고사항" value="${item.note||''}" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:5px;"></td>
+      <td><input id="rx-drug-${idx}" placeholder="약품명" value="${item.drug||''}" onchange="checkDuplicateRxDrug(${idx})" onkeydown="rxFieldKeydown(event,${idx},'drug')" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:5px;"></td>
+      <td><input id="rx-dose-${idx}" placeholder="예: 500mg" value="${item.dose||''}" onkeydown="rxFieldKeydown(event,${idx},'dose')" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:5px;"></td>
+      <td><select id="rx-freq-${idx}" onkeydown="rxFieldKeydown(event,${idx},'freq')" style="width:100%; padding:5px;">${rxOptionsHTML(RX_FREQ_OPTIONS, item.freq)}</select></td>
+      <td><input id="rx-dur-${idx}" type="number" placeholder="일수" value="${item.duration||''}" onkeydown="rxFieldKeydown(event,${idx},'dur')" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:5px;"></td>
+      <td><select id="rx-timing-${idx}" onkeydown="rxFieldKeydown(event,${idx},'timing')" style="width:100%; padding:5px;">${rxOptionsHTML(RX_TIMING_OPTIONS, item.timing)}</select></td>
+      <td><input id="rx-note-${idx}" placeholder="약국 참고사항" value="${item.note||''}" onkeydown="rxFieldKeydown(event,${idx},'note')" style="width:100%; border:1px solid var(--line); border-radius:4px; padding:5px;"></td>
       <td><span style="cursor:pointer; color:var(--rust);" onclick="removeRxRow(${idx})">✕</span></td>
     </tr>`;
+}
+
+// 처방 입력칸 키보드 이동: Tab은 브라우저 기본 동작으로 다음 칸으로 넘어가고,
+// ← (왼쪽 화살표)를 누르면 이전 칸으로 돌아간다. 텍스트/숫자 입력칸은 커서가 맨 앞(0번 위치)에
+// 있을 때만 이전 칸으로 이동한다(그래야 입력하던 글자 중간에서 왼쪽으로 커서를 옮기는 일반적인
+// 동작을 방해하지 않는다). number 타입 등 커서 위치를 지원하지 않는 입력칸과 select(드롭다운)는
+// 항상 이전 칸으로 이동한다. 이전 칸으로 이동한 뒤에는 그 칸의 기존 값을 전체 선택해두어,
+// 지우는 과정 없이 바로 숫자를 입력하면 기존 값이 즉시 새 값으로 바뀐다.
+const RX_FIELD_ORDER = ['drug','dose','freq','dur','timing','note'];
+function rxFieldKeydown(e, idx, fieldName){
+  if(e.key !== 'ArrowLeft') return;
+  const el = e.target;
+  if(el.tagName === 'INPUT'){
+    let atStart = true;
+    try{ atStart = (el.selectionStart === 0 && el.selectionEnd === 0); }
+    catch(err){ atStart = true; } // number 타입 등 캐럿 위치를 알 수 없는 입력칸은 항상 이동 허용
+    if(!atStart) return; // 글자 중간이면 커서만 왼쪽으로 이동(기본 동작 유지)
+  }
+  const pos = RX_FIELD_ORDER.indexOf(fieldName);
+  if(pos <= 0) return; // 이미 첫 칸(약품명)이면 더 이동할 곳 없음
+  e.preventDefault();
+  const prevField = RX_FIELD_ORDER[pos-1];
+  const prevEl = document.getElementById(`rx-${prevField}-${idx}`);
+  if(!prevEl) return;
+  prevEl.focus();
+  if(prevEl.tagName === 'INPUT'){
+    try{ prevEl.select(); }catch(err){}
+  }
 }
 
 // 이미 다른 행(다른 과 포함)에 같은 약품명이 있으면 중복 처방 여부를 확인한다.
@@ -2602,6 +2693,49 @@ function hasUnsavedVisitContent(){
   return !!(bp || weight || glucose || note || plan || photo || pdf || rxItems.length>0);
 }
 
+// 지금 차트 화면에 입력된 값들(활력징후/소견/처방/진단명)을 draftNote 형태로 모아준다.
+// DOM이 사라지기 전에 반드시 동기적으로(await 이전에) 호출해서 값을 캡처해야 한다.
+function collectCurrentDraftNote(){
+  return {
+    bp: document.getElementById('v-bp')?.value || '',
+    weight: document.getElementById('v-weight')?.value || '',
+    glucose: document.getElementById('v-glucose')?.value || '',
+    note: document.getElementById('v-note')?.value || '',
+    plan: document.getElementById('v-plan')?.value || '',
+    rxMode: document.getElementById('v-rx-mode')?.value || '',
+    rxItems: (typeof collectRxRows === 'function') ? collectRxRows() : [],
+    diagnoses: (typeof activeDraftDiagnoses !== 'undefined') ? activeDraftDiagnoses.slice() : []
+  };
+}
+function draftNoteHasContent(d){
+  return !!(d && (d.bp || d.weight || d.glucose || d.note || d.plan || (d.rxItems && d.rxItems.length) || (d.diagnoses && d.diagnoses.length)));
+}
+
+// 진료 중(진료완료를 누르기 전) 대기리스트/약국 등 다른 메뉴로 이동하거나, 뒤로가기·다른 환자
+// 차트 열기 등으로 화면을 벗어나도 작성 중이던 내용을 잃지 않도록 접수 세션(waitingList)의
+// draftNote로 자동 임시 저장해둔다. setScreen(), openChart(), popstate 핸들러 각각에서
+// 화면이 실제로 바뀌기 전에 호출한다. draftNote 값은 이 함수가 호출되는 시점(=아직 이전 화면의
+// DOM이 살아있는 시점)에 동기적으로 캡처하므로 안전하다.
+async function autoSaveChartDraftIfLeaving(){
+  if(screenName !== 'chart') return;
+  if(!activeWaitingId || activeDeptIndex===null || activeDeptIndex===undefined) return;
+  const draftNote = collectCurrentDraftNote(); // DOM이 사라지기 전에 즉시 캡처
+  if(!draftNoteHasContent(draftNote)) return;
+  const waitingId = activeWaitingId;
+  const deptIndex = activeDeptIndex;
+  try{
+    const wRef = db.collection('waitingList').doc(waitingId);
+    const wDoc = await wRef.get();
+    if(!wDoc.exists) return;
+    const wdata = wDoc.data();
+    const depts = (wdata.departments||[]).slice();
+    const dept = depts[deptIndex];
+    if(!dept || dept.status === 'done') return; // 이미 완료되어 약국 등으로 넘어간 과는 건드리지 않음
+    depts[deptIndex] = {...dept, draftNote};
+    await wRef.update({departments: depts});
+  }catch(err){ console.error('진료 중 임시 저장 실패', err); }
+}
+
 function hasClinicalContent(){
   const bp = document.getElementById('v-bp')?.value.trim();
   const weight = document.getElementById('v-weight')?.value.trim();
@@ -2701,6 +2835,7 @@ async function saveVisit(silent){
       if(wSnap.exists) existingVisitId = wSnap.data().visitId || null;
     }
 
+    let savedVisitId = existingVisitId;
     if(existingVisitId){
       const visitRef = db.collection('patients').doc(activePatientId).collection('visits').doc(existingVisitId);
       const prevSnap = await visitRef.get();
@@ -2730,9 +2865,21 @@ async function saveVisit(silent){
         dispenseMode: rxMode,
         createdBy: { name: currentUser.name, dept: deptLabel }
       });
+      savedVisitId = newVisitRef.id;
       if(wRefForSession){
         await wRefForSession.update({ visitId: newVisitRef.id }).catch(()=>{});
       }
+    }
+
+    // 이 환자의 "평생 첫 실제 진료"를 환자 문서에 캐시해둔다. 한 번 정해지면 다시 바뀌지 않으며,
+    // 이후 통계 화면에서 신환/재진을 판정할 때 이 값만 보면 되므로 환자 수만큼 개별 조회를 보낼 필요가 없어진다.
+    // (지금 이 저장이 성공했다는 것은 곧 이 환자에게 "실제 진료 내용"이 방금 처음 생겼거나 이미 있었다는 뜻이므로,
+    //  아직 firstVisitId가 없는 경우 지금 이 방문이 시간 순서상 첫 실제 진료가 맞다.)
+    if(activePatientData && !activePatientData.firstVisitId && !activePatientData.imported && !activePatientData.testPatient){
+      try{
+        await db.collection('patients').doc(activePatientId).update({firstVisitId: savedVisitId});
+        activePatientData.firstVisitId = savedVisitId;
+      }catch(err){ console.error('firstVisitId 캐시 저장 실패', err); }
     }
 
     if(activeWaitingId){
@@ -3533,21 +3680,30 @@ async function loadClinicStats(){
     const endTs = firebase.firestore.Timestamp.fromDate(end);
 
     // 전체 누적 통계 (기간과 무관, 사이트/연령/만성질환 현황 파악용) - 테스트용 환자는 제외
-    const patientsSnapAll = await db.collection('patients').get();
-    const siteFiltered = statsSiteFilter==='all' ? patientsSnapAll.docs : patientsSnapAll.docs.filter(d=>d.data().siteId===statsSiteFilter);
-    const patients = siteFiltered.filter(d=>!d.data().testPatient).map(d=>d.data());
+    // 특정 사이트가 선택된 경우, 서버 쪽에서 바로 필터링해서 불필요한 문서 읽기(Firestore 읽기 할당량)를 줄인다.
+    const patientsSnapAll = statsSiteFilter==='all'
+      ? await db.collection('patients').get()
+      : await db.collection('patients').where('siteId','==',statsSiteFilter).get();
+    const patients = patientsSnapAll.docs.filter(d=>!d.data().testPatient).map(d=>d.data());
     const bySite = {};
     const byAgeGroup = {'0-9':0,'10-19':0,'20-39':0,'40-59':0,'60+':0};
+    const byGender = {'남':0,'여':0,'기타/미상':0};
+    const ageGenderCross = {'0-9':{'남':0,'여':0},'10-19':{'남':0,'여':0},'20-39':{'남':0,'여':0},'40-59':{'남':0,'여':0},'60+':{'남':0,'여':0}};
     let htn=0, dm=0;
     patients.forEach(p=>{
       bySite[p.siteName] = (bySite[p.siteName]||0) + 1;
+      const g = (p.gender==='남'||p.gender==='여') ? p.gender : '기타/미상';
+      byGender[g] = (byGender[g]||0) + 1;
       const age = parseAgeYears(p.age);
+      let ageKey = null;
       if(!isNaN(age)){
-        if(age<10) byAgeGroup['0-9']++;
-        else if(age<20) byAgeGroup['10-19']++;
-        else if(age<40) byAgeGroup['20-39']++;
-        else if(age<60) byAgeGroup['40-59']++;
-        else byAgeGroup['60+']++;
+        if(age<10) ageKey='0-9';
+        else if(age<20) ageKey='10-19';
+        else if(age<40) ageKey='20-39';
+        else if(age<60) ageKey='40-59';
+        else ageKey='60+';
+        byAgeGroup[ageKey]++;
+        if(g==='남'||g==='여') ageGenderCross[ageKey][g]++;
       }
       if(p.history?.hypertension) htn++;
       if(p.history?.diabetes) dm++;
@@ -3579,20 +3735,30 @@ async function loadClinicStats(){
     // 신환 판정: "선택한 기간에 등록됐는지"가 아니라 "이 방문이 그 환자의 평생 첫 실제 진료인지"로 판단.
     // 이렇게 해야 '오늘/이번 주/이번 달' 중 무엇을 눌러도 같은 방문 기록이 항상 같은 결과(신환 또는 재진)로 나옴.
     // 날짜 숫자 비교 대신 문서 ID를 직접 비교해서, 시간 정밀도 오차로 인한 오분류를 원천 차단함.
+    // 성능 개선: 환자 문서에 캐시된 firstVisitId(진료 저장 시 자동 기록됨)가 있으면 그 값을 바로 쓰고,
+    // 아직 마이그레이션되지 않은(옛날에 등록된) 환자만 예전처럼 개별 조회로 보완한다.
+    // -> 마이그레이션(관리 > 신환 판정 데이터 정리)을 한 번 돌리고 나면 이 개별 조회는 사실상 발생하지 않는다.
     const uniquePatientIds = [...new Set(realVisitDocs.map(v => v.ref.parent.parent.id))];
     const firstRealVisitIdMap = {};
-    await Promise.all(uniquePatientIds.map(async pid=>{
+    const needsFirstVisitLookup = [];
+    uniquePatientIds.forEach(pid=>{
       const pat = patientMap[pid];
       if(!pat || pat.imported || pat.testPatient) return; // 가져온 환자·테스트 환자는 항상 재진 취급
-      const snap = await db.collection('patients').doc(pid).collection('visits')
-        .orderBy('date','asc').limit(20).get();
-      for(const d of snap.docs){
-        if(isRealVisitDoc(d.data())){
-          firstRealVisitIdMap[pid] = d.id;
-          break;
+      if(pat.firstVisitId){ firstRealVisitIdMap[pid] = pat.firstVisitId; return; }
+      needsFirstVisitLookup.push(pid);
+    });
+    if(needsFirstVisitLookup.length){
+      await Promise.all(needsFirstVisitLookup.map(async pid=>{
+        const snap = await db.collection('patients').doc(pid).collection('visits')
+          .orderBy('date','asc').limit(20).get();
+        for(const d of snap.docs){
+          if(isRealVisitDoc(d.data())){
+            firstRealVisitIdMap[pid] = d.id;
+            break;
+          }
         }
-      }
-    }));
+      }));
+    }
 
     // 명단에 표시할 "현재 상황" 계산용: 지금 이 순간 대기중/진료중인 접수 건, 조제·투약 대기중인 약국 건을 조회
     const liveWaitingSnap = await db.collection('waitingList').where('status','in',['waiting','inProgress']).get();
@@ -3631,6 +3797,42 @@ async function loadClinicStats(){
     const newInRange = statsVisitList.filter(v=>v.isNew).length;
     const returnVisitsInRange = sessionCount - newInRange;
 
+    // 기간별 추이: 선택한 기간을 적절한 단위(일/주/월)로 나누어 접수·신환·재진 추이와 증감률을 보여준다.
+    // 이미 불러온 statsVisitList를 그대로 재사용하므로 추가 조회가 필요 없다.
+    const spanDays = Math.max(1, Math.round((end - start) / 86400000) + 1);
+    const bucketUnit = spanDays <= 14 ? 'day' : (spanDays <= 120 ? 'week' : 'month');
+    function trendBucketKey(d){
+      const dt = d?.toDate ? d.toDate() : new Date(d);
+      if(bucketUnit==='month') return dt.toISOString().slice(0,7);
+      if(bucketUnit==='day') return dt.toISOString().slice(0,10);
+      const weekStart = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()-dt.getDay());
+      return weekStart.toISOString().slice(0,10) + ' 주';
+    }
+    const trendMap = {};
+    statsVisitList.forEach(v=>{
+      const key = trendBucketKey(v.date);
+      if(!trendMap[key]) trendMap[key] = {sessions:0, newP:0};
+      trendMap[key].sessions++;
+      if(v.isNew) trendMap[key].newP++;
+    });
+    const trendKeys = Object.keys(trendMap).sort();
+    let prevSessions = null;
+    const trendRows = trendKeys.map(k=>{
+      const {sessions, newP} = trendMap[k];
+      const ret = sessions - newP;
+      let changeLabel = '-';
+      if(prevSessions!==null){
+        if(prevSessions===0) changeLabel = sessions>0 ? '신규' : '0%';
+        else{
+          const pct = Math.round(((sessions-prevSessions)/prevSessions)*1000)/10;
+          changeLabel = (pct>0?'+':'') + pct + '%';
+        }
+      }
+      prevSessions = sessions;
+      return `<tr><td>${k}</td><td>${sessions}</td><td>${newP}</td><td>${ret}</td><td>${changeLabel}</td></tr>`;
+    }).join('') || '<tr><td colspan="5">데이터 없음</td></tr>';
+    const bucketLabel = bucketUnit==='day' ? '일별' : (bucketUnit==='week' ? '주별' : '월별');
+
     // "진료 건수"를 눌렀을 때 과별로 골라볼 수 있도록, 방문 문서 하나당 진료과 수만큼 행을 풀어서 만들어둔다.
     statsDeptVisitList = [];
     realVisitDocs.forEach(v=>{
@@ -3654,33 +3856,46 @@ async function loadClinicStats(){
       }
     });
 
-
-
-    let rxCount = {};
+    // 약물 처방 패턴: 구조화된 처방 항목(deptEntries[].rxItems) 기준으로 집계한다.
+    // (예전 방식은 화면 표시용 텍스트를 줄 단위로 쪼개어 세다 보니 부정확했다)
+    const drugCount = {};
+    let totalRxItemCount = 0, rxGroupCount = 0;
     realVisitDocs.forEach(v=>{
-      const rx = (v.data().prescription||'').trim();
-      if(rx) rx.split('\\n').forEach(line=>{
-        const l = line.trim();
-        if(l) rxCount[l] = (rxCount[l]||0) + 1;
+      const de = v.data().deptEntries;
+      const groups = Array.isArray(de) && de.length ? de : [v.data()];
+      groups.forEach(g=>{
+        const items = Array.isArray(g.rxItems) ? g.rxItems : [];
+        if(items.length===0) return;
+        rxGroupCount++;
+        totalRxItemCount += items.length;
+        items.forEach(it=>{
+          const name = (it.drug||'').trim();
+          if(name) drugCount[name] = (drugCount[name]||0) + 1;
+        });
       });
     });
-    const topRx = Object.entries(rxCount).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    const topDrugs = Object.entries(drugCount).sort((a,b)=>b[1]-a[1]).slice(0,10);
+    const avgDrugsPerRx = rxGroupCount ? Math.round((totalRxItemCount/rxGroupCount)*10)/10 : 0;
 
     // 다빈도 진단명: 향후 진료 계획(약품 재고, 인력 배치 등)에 참고할 수 있도록 진단명 코드 기준으로 집계
     const dxCount = {};
+    let dxTotal = 0;
     realVisitDocs.forEach(v=>{
       const de = v.data().deptEntries;
       const diagLists = Array.isArray(de) ? de.map(e=>e.diagnoses||[]) : [];
       diagLists.flat().forEach(dx=>{
         if(!dx || !dx.ko) return;
         dxCount[dx.ko] = (dxCount[dx.ko]||0) + 1;
+        dxTotal++;
       });
     });
     const topDx = Object.entries(dxCount).sort((a,b)=>b[1]-a[1]).slice(0,8);
 
     const siteRows = Object.entries(bySite).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('');
     const ageRows = Object.entries(byAgeGroup).map(([k,v])=>`<tr><td>${k}세</td><td>${v}</td></tr>`).join('');
-    const rxRows = topRx.map(([k,v])=>`<tr><td>${k.slice(0,25)}</td><td>${v}</td></tr>`).join('') || '<tr><td colspan="2">데이터 없음</td></tr>';
+    const genderRows = Object.entries(byGender).filter(([k,v])=>v>0).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td><td>${patients.length?Math.round(v/patients.length*1000)/10:0}%</td></tr>`).join('');
+    const ageGenderRows = Object.entries(ageGenderCross).map(([k,v])=>`<tr><td>${k}세</td><td>${v['남']}</td><td>${v['여']}</td></tr>`).join('');
+    const drugRows = topDrugs.map(([k,v])=>`<tr><td>${k.slice(0,25)}</td><td>${v}</td></tr>`).join('') || '<tr><td colspan="2">구조화된 처방 데이터가 없습니다</td></tr>';
 
     const rangeLabel = `${start.toISOString().slice(0,10)} ~ ${end.toISOString().slice(0,10)}`;
     const siteLabel = statsSiteFilter==='all' ? '전체 사이트' : (sites.find(s=>s.id===statsSiteFilter)?.name || '전체 사이트');
@@ -3709,10 +3924,15 @@ async function loadClinicStats(){
         </div>
         <div class="note" style="margin-top:8px;">한 분이 여러 진료과를 거치면 접수 건수는 1건, 진료 건수는 거친 과 수만큼(예: 2과 → 2건) 집계됩니다.</div>
       </div>
+      <div class="card" style="margin-bottom:16px;">
+        <h3>${bucketLabel} 추이 (기간 내, 증감률은 직전 구간 대비)</h3>
+        <table class="chronic-table"><tr><th>구간</th><th>접수</th><th>신환</th><th>재진</th><th>증감률</th></tr>${trendRows}</table>
+        <div class="note" style="margin-top:8px;">선택한 기간을 자동으로 ${spanDays<=14?'일':spanDays<=120?'주':'월'} 단위로 나눠 보여줍니다. 더 긴 추이를 보려면 "기간 지정"에서 넉넉한 기간을 선택하세요. 논문·보고서용 추세 자료로 활용할 수 있습니다.</div>
+      </div>
       <div class="grid2" style="margin-bottom:16px;">
         <div class="card"><h3>${siteLabel} 누적 등록</h3>
           <div style="font-size:30px; font-weight:700; font-family:ui-monospace,monospace;">${patients.length}<span style="font-size:14.5px; color:var(--ink-soft);"> 명</span></div>
-          <div style="font-size:14px; color:var(--ink-soft); margin-top:6px;">고혈압 ${htn}명 · 당뇨 ${dm}명</div>
+          <div style="font-size:14px; color:var(--ink-soft); margin-top:6px;">고혈압 ${htn}명 (${patients.length?Math.round(htn/patients.length*1000)/10:0}%) · 당뇨 ${dm}명 (${patients.length?Math.round(dm/patients.length*1000)/10:0}%)</div>
         </div>
         <div class="card"><h3>사이트별 등록 수${statsSiteFilter==='all'?' (전체)':''}</h3><table class="chronic-table"><tr><th>사이트</th><th>명</th></tr>${siteRows}</table></div>
       </div>
@@ -3720,13 +3940,23 @@ async function loadClinicStats(){
         <h3 id="stats-visit-list-title">기간 내 진료 명단</h3>
         <div id="stats-visit-list"></div>
       </div>
+      <div class="grid2" style="margin-bottom:16px;">
+        <div class="card"><h3>연령별 통계 (누적, ${siteLabel})</h3>
+          <table class="chronic-table"><tr><th>연령대</th><th>명</th></tr>${ageRows}</table>
+        </div>
+        <div class="card"><h3>성별 분포 (누적, ${siteLabel})</h3>
+          <table class="chronic-table"><tr><th>성별</th><th>명</th><th>비율</th></tr>${genderRows || '<tr><td colspan="3">데이터 없음</td></tr>'}</table>
+        </div>
+      </div>
       <div class="card" style="margin-bottom:16px;">
-        <h3>연령별 통계 (${siteLabel})</h3>
-        <table class="chronic-table"><tr><th>연령대</th><th>명</th></tr>${ageRows}</table>
+        <h3>연령×성별 교차 분포 (누적, ${siteLabel})</h3>
+        <table class="chronic-table"><tr><th>연령대</th><th>남</th><th>여</th></tr>${ageGenderRows}</table>
       </div>
       <div class="grid2">
-        <div class="card"><h3>다빈도 처방 (기간 내, 상위 5)</h3><table class="chronic-table"><tr><th>처방 내용</th><th>건수</th></tr>${rxRows}</table></div>
-        <div class="card"><h3>다빈도 진단명 (기간 내, 상위 8)</h3><table class="chronic-table"><tr><th>진단명</th><th>건수</th></tr>${topDx.map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('') || '<tr><td colspan="2">진단명이 입력된 기록이 없습니다</td></tr>'}</table>
+        <div class="card"><h3>다빈도 처방 약물 (기간 내, 상위 10)</h3><table class="chronic-table"><tr><th>약품명</th><th>처방 건수</th></tr>${drugRows}</table>
+          <div class="note" style="margin-top:8px;">처방 1건(과별 1회)당 평균 ${avgDrugsPerRx}개 약품이 처방되었습니다.</div>
+        </div>
+        <div class="card"><h3>다빈도 진단명 (기간 내, 상위 8)</h3><table class="chronic-table"><tr><th>진단명</th><th>건수</th><th>비율</th></tr>${topDx.map(([k,v])=>`<tr><td>${k}</td><td>${v}</td><td>${dxTotal?Math.round(v/dxTotal*1000)/10:0}%</td></tr>`).join('') || '<tr><td colspan="3">진단명이 입력된 기록이 없습니다</td></tr>'}</table>
           <div class="note" style="margin-top:8px;">진단명은 진료 시 "진단명 검색"에서 선택해야 여기 집계됩니다. 계절별 추세를 파악하면 다음 단기팀 방문 때 준비할 약품·인력을 미리 계획하는 데 참고할 수 있습니다.</div>
         </div>
       </div>
