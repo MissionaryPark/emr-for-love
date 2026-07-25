@@ -971,8 +971,7 @@ function isRealVisitDoc(d){
   return !!(note || hasBp || hasWeight || hasGlucose || hasPlan || hasRxItems || hasRxText || hasPdf);
 }
 
-async function getTodayVisitedPatients(){
-  const {startTs, endTs} = getTodayRange();
+async function getVisitedPatientsInRange(startTs, endTs){
   const visitsSnap = await db.collectionGroup('visits')
     .where('date','>=',startTs).where('date','<=',endTs).get();
   const realDocs = visitsSnap.docs.filter(v=> isRealVisitDoc(v.data()));
@@ -981,7 +980,7 @@ async function getTodayVisitedPatients(){
   const patientMap = {};
   patientDocs.forEach(d=>{ if(d.exists) patientMap[d.id] = d.data(); });
 
-  // 환자별로 오늘의 가장 최근 방문만 대표로 표시
+  // 환자별로 기간 내 가장 최근 방문만 대표로 표시
   const latestByPatient = {};
   realDocs.forEach(v=>{
     const pid = v.ref.parent.parent.id;
@@ -998,19 +997,58 @@ async function getTodayVisitedPatients(){
     return !(p && p.testPatient);
   }).sort((a,b)=> b.ms - a.ms);
 }
+async function getTodayVisitedPatients(){
+  const {startTs, endTs} = getTodayRange();
+  return getVisitedPatientsInRange(startTs, endTs);
+}
 
 /* =========================================================
    5-1. 진료완료 리스트 (독립 메뉴) - "오늘 실제 진료 기록이 남은" 환자 기준
    ========================================================= */
+let doneListStart = null, doneListEnd = null;
 async function renderDoneList(){
   const main = document.getElementById('main');
-  main.innerHTML = `<div class="topbar"><h2>진료완료 리스트</h2></div><div id="donelist-body" class="queue"><div class="empty-note">${t('loading')}</div></div>`;
+  const today = new Date().toISOString().slice(0,10);
+  if(!doneListStart) doneListStart = today;
+  if(!doneListEnd) doneListEnd = today;
+  main.innerHTML = `
+    <div class="topbar"><h2>진료완료 리스트</h2></div>
+    <div class="card">
+      <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
+        <div class="field" style="margin-bottom:0;"><label>시작일</label><input type="date" id="donelist-start" value="${doneListStart}"></div>
+        <div class="field" style="margin-bottom:0;"><label>종료일</label><input type="date" id="donelist-end" value="${doneListEnd}"></div>
+        <button class="btn small outline" style="width:auto;" onclick="setDoneListToday()">오늘</button>
+        <button class="btn small" style="width:auto;" onclick="applyDoneListRange()">조회</button>
+      </div>
+    </div>
+    <div id="donelist-body" class="queue" style="margin-top:14px;"><div class="empty-note">${t('loading')}</div></div>
+  `;
+  loadDoneList();
+}
+function setDoneListToday(){
+  const today = new Date().toISOString().slice(0,10);
+  doneListStart = today; doneListEnd = today;
+  renderDoneList();
+}
+function applyDoneListRange(){
+  const s = document.getElementById('donelist-start')?.value;
+  const e = document.getElementById('donelist-end')?.value;
+  if(s) doneListStart = s;
+  if(e) doneListEnd = e;
+  loadDoneList();
+}
+async function loadDoneList(){
+  const body = document.getElementById('donelist-body');
+  if(!body) return;
+  body.innerHTML = `<div class="empty-note">${t('loading')}</div>`;
   try{
-    const list = await getTodayVisitedPatients();
-    const body = document.getElementById('donelist-body');
-    if(!body) return;
-    if(list.length === 0){ body.innerHTML = '<div class="empty-note">오늘 진료완료된 환자가 없습니다.</div>'; return; }
-    body.innerHTML = list.map(v=>`
+    const startTs = firebase.firestore.Timestamp.fromDate(new Date(doneListStart+'T00:00:00'));
+    const endTs = firebase.firestore.Timestamp.fromDate(new Date(doneListEnd+'T23:59:59'));
+    const list = await getVisitedPatientsInRange(startTs, endTs);
+    const bodyEl = document.getElementById('donelist-body');
+    if(!bodyEl) return; // 조회하는 사이 다른 화면으로 이동했으면 그냥 무시
+    if(list.length === 0){ bodyEl.innerHTML = '<div class="empty-note">해당 기간에 진료완료(실제 진료 기록이 저장)된 환자가 없습니다.</div>'; return; }
+    bodyEl.innerHTML = list.map(v=>`
       <div class="queue-card" onclick="openChartSafely('${v.patientId}')">
         <div class="qc-info">
           <div class="name">${v.name}</div>
@@ -1020,8 +1058,8 @@ async function renderDoneList(){
       </div>
     `).join('');
   }catch(err){
-    const body = document.getElementById('donelist-body');
-    if(body) body.innerHTML = `<div class="empty-note">목록을 불러오지 못했습니다. 아래 링크를 눌러 색인을 만들어주세요:<br>${linkify(err.message)}</div>`;
+    const bodyEl = document.getElementById('donelist-body');
+    if(bodyEl) bodyEl.innerHTML = `<div class="empty-note">목록을 불러오지 못했습니다. 아래 링크를 눌러 색인을 만들어주세요:<br>${linkify(err.message)}</div>`;
   }
 }
 
