@@ -958,6 +958,18 @@ function renderQueue(){
 // 비어 있어도 BP/체중/혈당/처방/plan/PDF 등 임상 내용이 하나라도 있으면 "실제 진료"로 인정한다.
 // (예전 로직은 progressNote가 비어있으면 무조건 제외했는데, 이 때문에 바쁜 현장에서
 //  소견을 따로 타이핑하지 않고 처방/BP만 기록한 실제 진료가 통계·리스트에서 누락되는 문제가 있었음)
+// 인터넷 연결이 불안정한 현장에서, 기기에 남아있는 오래된 캐시 결과가 그대로 화면에 나오는 것을
+// 막기 위한 공용 헬퍼. 항상 서버의 최신 데이터를 먼저 시도하고, 정말 오프라인이라 서버 조회가
+// 실패할 때만 캐시로 대체한다. usedCacheFlag(있으면)에 캐시 사용 여부를 기록해준다.
+async function firestoreGetFresh(query, usedCacheFlag){
+  try{ return await query.get({source:'server'}); }
+  catch(err){
+    console.error('서버 우선 조회 실패, 캐시로 재시도', err);
+    if(usedCacheFlag) usedCacheFlag.used = true;
+    return await query.get();
+  }
+}
+
 function isRealVisitDoc(d){
   const note = (d.progressNote||'').toString().trim();
   if(note === '(초진 등록)') return false;
@@ -973,8 +985,8 @@ function isRealVisitDoc(d){
 
 async function getVisitedPatientsInRange(startTs, endTs, deptFilter){
   const df = deptFilter || 'all';
-  const visitsSnap = await db.collectionGroup('visits')
-    .where('date','>=',startTs).where('date','<=',endTs).get();
+  const visitsSnap = await firestoreGetFresh(db.collectionGroup('visits')
+    .where('date','>=',startTs).where('date','<=',endTs));
   function deptEntriesOfDoc(data){
     const de = data.deptEntries;
     return Array.isArray(de) && de.length ? de : [{deptName:'일반진료'}];
@@ -3748,9 +3760,14 @@ async function loadClinicStats(){
 
     // 전체 누적 통계 (기간과 무관, 사이트/연령/만성질환 현황 파악용) - 테스트용 환자는 제외
     // 특정 사이트가 선택된 경우, 서버 쪽에서 바로 필터링해서 불필요한 문서 읽기(Firestore 읽기 할당량)를 줄인다.
+    // 항상 서버의 최신 데이터를 우선 사용한다: 인터넷 연결이 불안정한 환경에서 기기에 남아있는
+    // 오래된 캐시 결과(예: 그 기간에 아직 진료 기록이 없었을 때의 빈 결과)가 그대로 다시 나오는 것을 막기 위함.
+    // (네트워크가 정말 끊겨 있으면 서버 조회가 실패하므로, 그때만 캐시로 대체한다)
+    let statsUsedCache = false;
+    const cacheFlag = {used:false};
     const patientsSnapAll = statsSiteFilter==='all'
-      ? await db.collection('patients').get()
-      : await db.collection('patients').where('siteId','==',statsSiteFilter).get();
+      ? await firestoreGetFresh(db.collection('patients'), cacheFlag)
+      : await firestoreGetFresh(db.collection('patients').where('siteId','==',statsSiteFilter), cacheFlag);
     const patients = patientsSnapAll.docs.filter(d=>!d.data().testPatient).map(d=>d.data());
     const bySite = {};
     const byAgeGroup = {'0-9':0,'10-19':0,'20-39':0,'40-59':0,'60+':0};
@@ -3778,8 +3795,9 @@ async function loadClinicStats(){
 
     // 기간 내 전체 방문(진료) 기록 - collectionGroup 조회
     // 접수 시 자동 생성되는 "(초진 등록)" 스텁이나 빈 프로그레스 노트는 실제 진료로 세지 않음
-    const visitsSnapRaw = await db.collectionGroup('visits')
-      .where('date','>=',startTs).where('date','<=',endTs).get();
+    const visitsSnapRaw = await firestoreGetFresh(db.collectionGroup('visits')
+      .where('date','>=',startTs).where('date','<=',endTs), cacheFlag);
+    statsUsedCache = cacheFlag.used;
 
     const patientMap = {};
     patientsSnapAll.docs.forEach(d => { patientMap[d.id] = d.data(); });
@@ -3988,7 +4006,7 @@ async function loadClinicStats(){
 
     body.innerHTML = `
       <div class="note">선택 사이트: ${siteLabel} · 선택 진료과: ${statsDeptFilter==='all'?'전체':statsDeptFilter} · 선택 기간: ${rangeLabel} (접수·신환·재진·진료건수·처방·진단 통계는 이 기간+진료과 기준, 사이트/연령/만성질환 표는 전체 누적 기준)</div>
-      <div class="note" style="opacity:0.75; font-size:12.5px;">진단 정보 — 이 기간의 방문기록 ${dbgTotal}건 → 실제진료 판정 통과 ${dbgReal}건 → 환자정보 연결 ${dbgHasPatient}건 → 사이트 조건 통과 ${dbgSiteOk}건 → 진료과 조건 통과 ${dbgDeptOk}건</div>
+      <div class="note" style="opacity:0.75; font-size:12.5px;">진단 정보 — 이 기간의 방문기록 ${dbgTotal}건 → 실제진료 판정 통과 ${dbgReal}건 → 환자정보 연결 ${dbgHasPatient}건 → 사이트 조건 통과 ${dbgSiteOk}건 → 진료과 조건 통과 ${dbgDeptOk}건${statsUsedCache ? ' · ⚠️ 네트워크가 불안정해서 기기에 저장된 캐시 데이터를 대신 사용했습니다(최신 정보가 아닐 수 있어요. 인터넷 연결 후 다시 조회해보세요)' : ' · 서버 최신 데이터 사용됨'}</div>
       <div class="card" style="margin-bottom:16px;">
         <h3>기간 내 진료 현황 (숫자를 눌러서 명단 보기)</h3>
         <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:10px;">
