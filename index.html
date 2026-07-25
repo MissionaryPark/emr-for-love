@@ -971,27 +971,37 @@ function isRealVisitDoc(d){
   return !!(note || hasBp || hasWeight || hasGlucose || hasPlan || hasRxItems || hasRxText || hasPdf);
 }
 
-async function getVisitedPatientsInRange(startTs, endTs){
+async function getVisitedPatientsInRange(startTs, endTs, deptFilter){
+  const df = deptFilter || 'all';
   const visitsSnap = await db.collectionGroup('visits')
     .where('date','>=',startTs).where('date','<=',endTs).get();
-  const realDocs = visitsSnap.docs.filter(v=> isRealVisitDoc(v.data()));
+  function deptEntriesOfDoc(data){
+    const de = data.deptEntries;
+    return Array.isArray(de) && de.length ? de : [{deptName:'일반진료'}];
+  }
+  const realDocs = visitsSnap.docs.filter(v=>{
+    if(!isRealVisitDoc(v.data())) return false;
+    if(df==='all') return true;
+    return deptEntriesOfDoc(v.data()).some(e=>(e.deptName||'일반진료')===df);
+  });
   const uniquePatientIds = [...new Set(realDocs.map(v=>v.ref.parent.parent.id))];
   const patientDocs = await Promise.all(uniquePatientIds.map(pid=>db.collection('patients').doc(pid).get()));
   const patientMap = {};
   patientDocs.forEach(d=>{ if(d.exists) patientMap[d.id] = d.data(); });
 
-  // 환자별로 기간 내 가장 최근 방문만 대표로 표시
+  // 환자별로 기간 내 가장 최근 방문만 대표로 표시 (진료과를 지정한 경우, 그 과가 포함된 항목만 이름으로 표시)
   const latestByPatient = {};
   realDocs.forEach(v=>{
     const pid = v.ref.parent.parent.id;
     const ms = v.data().date && v.data().date.toMillis ? v.data().date.toMillis() : 0;
     if(!latestByPatient[pid] || ms > latestByPatient[pid].ms){
-      latestByPatient[pid] = {ms};
+      const matched = df==='all' ? deptEntriesOfDoc(v.data()) : deptEntriesOfDoc(v.data()).filter(e=>(e.deptName||'일반진료')===df);
+      latestByPatient[pid] = {ms, deptNames: matched.map(e=>e.deptName||'일반진료').join(', ')};
     }
   });
-  return Object.entries(latestByPatient).map(([pid, {ms}])=>{
+  return Object.entries(latestByPatient).map(([pid, {ms, deptNames}])=>{
     const p = patientMap[pid] || {};
-    return {patientId: pid, name: p.name||'(알 수 없음)', regNo: p.regNo||'-', gender:p.gender, age:p.age, siteName: p.siteName||'-', ms};
+    return {patientId: pid, name: p.name||'(알 수 없음)', regNo: p.regNo||'-', gender:p.gender, age:p.age, siteName: p.siteName||'-', ms, deptNames};
   }).filter(x=>{
     const p = patientMap[x.patientId];
     return !(p && p.testPatient);
@@ -1005,18 +1015,21 @@ async function getTodayVisitedPatients(){
 /* =========================================================
    5-1. 진료완료 리스트 (독립 메뉴) - "오늘 실제 진료 기록이 남은" 환자 기준
    ========================================================= */
-let doneListStart = null, doneListEnd = null;
+let doneListStart = null, doneListEnd = null, doneListDept = 'all';
 async function renderDoneList(){
   const main = document.getElementById('main');
   const today = new Date().toISOString().slice(0,10);
   if(!doneListStart) doneListStart = today;
   if(!doneListEnd) doneListEnd = today;
+  const deptOptions = `<option value="all" ${doneListDept==='all'?'selected':''}>전체 진료과</option>`
+    + ['일반진료', ...DEPT_OPTIONS].map(d=>`<option value="${d}" ${d===doneListDept?'selected':''}>${d}</option>`).join('');
   main.innerHTML = `
     <div class="topbar"><h2>진료완료 리스트</h2></div>
     <div class="card">
       <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap;">
         <div class="field" style="margin-bottom:0;"><label>시작일</label><input type="date" id="donelist-start" value="${doneListStart}"></div>
         <div class="field" style="margin-bottom:0;"><label>종료일</label><input type="date" id="donelist-end" value="${doneListEnd}"></div>
+        <div class="field" style="margin-bottom:0; max-width:200px;"><label>진료과</label><select id="donelist-dept">${deptOptions}</select></div>
         <button class="btn small outline" style="width:auto;" onclick="setDoneListToday()">오늘</button>
         <button class="btn small" style="width:auto;" onclick="applyDoneListRange()">조회</button>
       </div>
@@ -1033,8 +1046,10 @@ function setDoneListToday(){
 function applyDoneListRange(){
   const s = document.getElementById('donelist-start')?.value;
   const e = document.getElementById('donelist-end')?.value;
+  const d = document.getElementById('donelist-dept')?.value;
   if(s) doneListStart = s;
   if(e) doneListEnd = e;
+  doneListDept = d || 'all';
   loadDoneList();
 }
 async function loadDoneList(){
@@ -1044,15 +1059,15 @@ async function loadDoneList(){
   try{
     const startTs = firebase.firestore.Timestamp.fromDate(new Date(doneListStart+'T00:00:00'));
     const endTs = firebase.firestore.Timestamp.fromDate(new Date(doneListEnd+'T23:59:59'));
-    const list = await getVisitedPatientsInRange(startTs, endTs);
+    const list = await getVisitedPatientsInRange(startTs, endTs, doneListDept);
     const bodyEl = document.getElementById('donelist-body');
     if(!bodyEl) return; // 조회하는 사이 다른 화면으로 이동했으면 그냥 무시
-    if(list.length === 0){ bodyEl.innerHTML = '<div class="empty-note">해당 기간에 진료완료(실제 진료 기록이 저장)된 환자가 없습니다.</div>'; return; }
+    if(list.length === 0){ bodyEl.innerHTML = '<div class="empty-note">해당 기간(및 진료과 조건)에 진료완료(실제 진료 기록이 저장)된 환자가 없습니다.</div>'; return; }
     bodyEl.innerHTML = list.map(v=>`
       <div class="queue-card" onclick="openChartSafely('${v.patientId}')">
         <div class="qc-info">
           <div class="name">${v.name}</div>
-          <div class="meta">${v.gender||''} · ${ageLabel(v.age)} · ${v.siteName}</div>
+          <div class="meta">${v.gender||''} · ${ageLabel(v.age)} · ${v.siteName}${v.deptNames?' · '+v.deptNames:''}</div>
         </div>
         <div class="qc-regno mono">${v.regNo}</div>
       </div>
@@ -3535,6 +3550,7 @@ let statsCustomEnd = null;
 let statsVisitList = [];
 let statsDeptVisitList = []; // "진료 건수" 클릭 시 과별로 골라보기 위한 명단
 let statsSiteFilter = 'all';
+let statsDeptFilter = 'all';
 let statsListFilter = 'all';
 
 function toggleStatsVisitList(filter){
@@ -3635,6 +3651,8 @@ function statsScreenHTML(){
   const today = new Date().toISOString().slice(0,10);
   const siteOptions = `<option value="all" ${statsSiteFilter==='all'?'selected':''}>전체 사이트</option>`
     + sites.map(s=>`<option value="${s.id}" ${s.id===statsSiteFilter?'selected':''}>${s.name}</option>`).join('');
+  const deptOptions = `<option value="all" ${statsDeptFilter==='all'?'selected':''}>전체 진료과</option>`
+    + ['일반진료', ...DEPT_OPTIONS].map(d=>`<option value="${d}" ${d===statsDeptFilter?'selected':''}>${d}</option>`).join('');
   return `
     <div class="topbar"><h2>통계 / 보고서</h2></div>
     <div style="display:flex; gap:8px; margin-bottom:12px;">
@@ -3643,9 +3661,16 @@ function statsScreenHTML(){
       <div class="tab-pill ${statsTab==='pharmacy'?'active':''}" style="flex:1; text-align:center;" onclick="setStatsTab('pharmacy')">💊 약국 통계</div>
     </div>
     <div class="card">
-      <div class="field" style="max-width:260px; margin-bottom:12px;">
-        <label>사이트</label>
-        <select id="stats-site-select" onchange="onStatsSiteChange()">${siteOptions}</select>
+      <div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+        <div class="field" style="max-width:260px; margin-bottom:0;">
+          <label>사이트</label>
+          <select id="stats-site-select" onchange="onStatsSiteChange()">${siteOptions}</select>
+        </div>
+        ${statsTab==='clinic' ? `
+        <div class="field" style="max-width:220px; margin-bottom:0;">
+          <label>진료과</label>
+          <select id="stats-dept-select" onchange="onStatsDeptChange()">${deptOptions}</select>
+        </div>` : ''}
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
         <button class="btn small ${statsRangeType==='day'?'':'outline'}" onclick="setStatsRange('day')">오늘</button>
@@ -3665,6 +3690,10 @@ function statsScreenHTML(){
 
 function onStatsSiteChange(){
   statsSiteFilter = document.getElementById('stats-site-select').value;
+  loadStats();
+}
+function onStatsDeptChange(){
+  statsDeptFilter = document.getElementById('stats-dept-select').value;
   loadStats();
 }
 
@@ -3755,19 +3784,41 @@ async function loadClinicStats(){
     const patientMap = {};
     patientsSnapAll.docs.forEach(d => { patientMap[d.id] = d.data(); });
 
+    // 방어적 보정: 위 일괄 조회(patientsSnapAll)에 어떤 이유로든 특정 환자가 빠져 있으면
+    // (오래된 캐시, 등록 시점 차이 등) 통계가 "진료완료 리스트"와 다르게 나올 수 있으므로,
+    // 방문 기록에 실제로 연결된 환자인데 patientMap에 없는 경우에는 그 환자만 개별로 다시 조회해서 채워 넣는다.
+    const visitPatientIds = [...new Set(visitsSnapRaw.docs.map(v=>v.ref.parent.parent.id))];
+    const missingPatientIds = visitPatientIds.filter(pid=>!patientMap[pid]);
+    if(missingPatientIds.length){
+      const missingDocs = await Promise.all(missingPatientIds.map(pid=>db.collection('patients').doc(pid).get()));
+      missingDocs.forEach(d=>{ if(d.exists) patientMap[d.id] = d.data(); });
+    }
+
+    // 진료과 지정 시: 그 진료과가 실제로 참여한 세션(방문 문서)만 남긴다.
+    function deptEntriesOf(v){
+      const de = v.data().deptEntries;
+      return Array.isArray(de) && de.length ? de : [{deptName:'일반진료'}];
+    }
+    function matchesDeptFilter(deptName){
+      return statsDeptFilter==='all' || (deptName||'일반진료')===statsDeptFilter;
+    }
+
     const realVisitDocs = visitsSnapRaw.docs.filter(v=>{
       if(!isRealVisitDoc(v.data())) return false;
       const patientId = v.ref.parent.parent.id;
       const pat = patientMap[patientId];
       if(!pat || pat.testPatient) return false;
       if(statsSiteFilter!=='all' && pat.siteId !== statsSiteFilter) return false;
+      if(statsDeptFilter!=='all' && !deptEntriesOf(v).some(e=>matchesDeptFilter(e.deptName))) return false;
       return true;
     });
-    const sessionCount = realVisitDocs.length; // 접수 건수 (한 번의 접수 = 여러 과가 봤어도 문서 1건)
+    const sessionCount = realVisitDocs.length; // 접수 건수 (한 번의 접수 = 여러 과가 봤어도 문서 1건. 진료과 지정 시: 그 과가 포함된 세션 수)
     // 진료 건수: 한 세션 안에 여러 진료과가 이어서 본 경우 그 과 수만큼 센다 (예: 내과+안과 1명 = 접수 1건, 진료 2건)
+    // 진료과를 지정한 경우 그 과의 진료 건수만 센다.
     const deptVisitCount = realVisitDocs.reduce((sum, v)=>{
-      const de = v.data().deptEntries;
-      return sum + (Array.isArray(de) && de.length ? de.length : 1);
+      const de = deptEntriesOf(v);
+      const matched = statsDeptFilter==='all' ? de : de.filter(e=>matchesDeptFilter(e.deptName));
+      return sum + matched.length;
     }, 0);
 
     // 신환 판정: "선택한 기간에 등록됐는지"가 아니라 "이 방문이 그 환자의 평생 첫 실제 진료인지"로 판단.
@@ -3817,7 +3868,7 @@ async function loadClinicStats(){
       const patientId = v.ref.parent.parent.id;
       const p = patientMap[patientId] || {};
       const isNew = firstRealVisitIdMap[patientId] !== undefined && v.id === firstRealVisitIdMap[patientId];
-      const deptEntries = Array.isArray(v.data().deptEntries) ? v.data().deptEntries : [];
+      const deptEntries = deptEntriesOf(v).filter(e=>matchesDeptFilter(e.deptName));
       return {
         patientId, name: p.name||'(알 수 없음)', regNo: p.regNo||'-', siteName: p.siteName||'-',
         date: v.data().date, progressNote: v.data().progressNote||'', isNew,
@@ -3872,35 +3923,27 @@ async function loadClinicStats(){
     const bucketLabel = bucketUnit==='day' ? '일별' : (bucketUnit==='week' ? '주별' : '월별');
 
     // "진료 건수"를 눌렀을 때 과별로 골라볼 수 있도록, 방문 문서 하나당 진료과 수만큼 행을 풀어서 만들어둔다.
+    // 진료과를 지정한 경우 그 과의 항목만 담는다.
     statsDeptVisitList = [];
     realVisitDocs.forEach(v=>{
       const patientId = v.ref.parent.parent.id;
       const p = patientMap[patientId] || {};
-      const de = Array.isArray(v.data().deptEntries) ? v.data().deptEntries : null;
-      if(de && de.length){
-        de.forEach(e=>{
-          statsDeptVisitList.push({
-            patientId, name: p.name||'(알 수 없음)', regNo: p.regNo||'-', siteName: p.siteName||'-',
-            date: v.data().date, deptName: e.deptName||'일반진료', doctorName: e.doctorName||'',
-            currentStatus: currentStatusLabel(patientId)
-          });
-        });
-      } else {
+      const de = deptEntriesOf(v).filter(e=>matchesDeptFilter(e.deptName));
+      de.forEach(e=>{
         statsDeptVisitList.push({
           patientId, name: p.name||'(알 수 없음)', regNo: p.regNo||'-', siteName: p.siteName||'-',
-          date: v.data().date, deptName: '(과 정보 없음)', doctorName: '',
+          date: v.data().date, deptName: e.deptName||'일반진료', doctorName: e.doctorName||'',
           currentStatus: currentStatusLabel(patientId)
         });
-      }
+      });
     });
 
     // 약물 처방 패턴: 구조화된 처방 항목(deptEntries[].rxItems) 기준으로 집계한다.
-    // (예전 방식은 화면 표시용 텍스트를 줄 단위로 쪼개어 세다 보니 부정확했다)
+    // (예전 방식은 화면 표시용 텍스트를 줄 단위로 쪼개어 세다 보니 부정확했다) 진료과 지정 시 그 과의 처방만 집계.
     const drugCount = {};
     let totalRxItemCount = 0, rxGroupCount = 0;
     realVisitDocs.forEach(v=>{
-      const de = v.data().deptEntries;
-      const groups = Array.isArray(de) && de.length ? de : [v.data()];
+      const groups = deptEntriesOf(v).filter(e=>matchesDeptFilter(e.deptName));
       groups.forEach(g=>{
         const items = Array.isArray(g.rxItems) ? g.rxItems : [];
         if(items.length===0) return;
@@ -3915,12 +3958,11 @@ async function loadClinicStats(){
     const topDrugs = Object.entries(drugCount).sort((a,b)=>b[1]-a[1]).slice(0,10);
     const avgDrugsPerRx = rxGroupCount ? Math.round((totalRxItemCount/rxGroupCount)*10)/10 : 0;
 
-    // 다빈도 진단명: 향후 진료 계획(약품 재고, 인력 배치 등)에 참고할 수 있도록 진단명 코드 기준으로 집계
+    // 다빈도 진단명: 향후 진료 계획(약품 재고, 인력 배치 등)에 참고할 수 있도록 진단명 코드 기준으로 집계. 진료과 지정 시 그 과의 진단만 집계.
     const dxCount = {};
     let dxTotal = 0;
     realVisitDocs.forEach(v=>{
-      const de = v.data().deptEntries;
-      const diagLists = Array.isArray(de) ? de.map(e=>e.diagnoses||[]) : [];
+      const diagLists = deptEntriesOf(v).filter(e=>matchesDeptFilter(e.deptName)).map(e=>e.diagnoses||[]);
       diagLists.flat().forEach(dx=>{
         if(!dx || !dx.ko) return;
         dxCount[dx.ko] = (dxCount[dx.ko]||0) + 1;
@@ -3939,7 +3981,7 @@ async function loadClinicStats(){
     const siteLabel = statsSiteFilter==='all' ? '전체 사이트' : (sites.find(s=>s.id===statsSiteFilter)?.name || '전체 사이트');
 
     body.innerHTML = `
-      <div class="note">선택 사이트: ${siteLabel} · 선택 기간: ${rangeLabel} (접수·신환·재진·진료건수는 이 기간 기준, 사이트/연령/만성질환 표는 전체 누적 기준)</div>
+      <div class="note">선택 사이트: ${siteLabel} · 선택 진료과: ${statsDeptFilter==='all'?'전체':statsDeptFilter} · 선택 기간: ${rangeLabel} (접수·신환·재진·진료건수·처방·진단 통계는 이 기간+진료과 기준, 사이트/연령/만성질환 표는 전체 누적 기준)</div>
       <div class="card" style="margin-bottom:16px;">
         <h3>기간 내 진료 현황 (숫자를 눌러서 명단 보기)</h3>
         <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:10px;">
